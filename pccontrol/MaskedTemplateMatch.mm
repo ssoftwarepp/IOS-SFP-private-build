@@ -20,8 +20,6 @@ static unsigned char *zxRGBA(CGImageRef image, size_t *width, size_t *height) {
                                                 space, kCGImageAlphaPremultipliedLast | kCGBitmapByteOrder32Big);
     CGColorSpaceRelease(space);
     if (!bitmap) { free(pixels); return NULL; }
-    CGContextTranslateCTM(bitmap, 0, *height);
-    CGContextScaleCTM(bitmap, 1, -1);
     CGContextDrawImage(bitmap, CGRectMake(0, 0, *width, *height), image);
     CGContextRelease(bitmap);
     return pixels;

@@ -47,3 +47,9 @@ Experience lookup receipts: global `q-e354d2a7570d`, local `q-a2ac572fc03f`; thi
 
 - A game-screen request produced `OCR_RESPONSE_INVALID: PaddleOCR: invalid detected text crop`. Detection clamps each quad corner to screenshot boundaries; a pathological contour may collapse to zero width or height. Filter degenerate/nonfinite boxes before recognition and skip empty crop results instead of aborting the full page.
 - Source-oriented regression asserts all three guards. Local Python tests: 56 passed; inline dashboard JS syntax and changed-file whitespace checks pass. Worker fix takes effect only after installing a newly built package.
+
+## Match coordinate and OCR visibility: 06:27 Asia/Shanghai
+
+- Captured a 750×1334 screenshot and cropped a 48×48 template at `(250,700)`. Searching the *same* uploaded PNG still returned `(249,584)` at threshold 0.85; `1334 - 700 - 48 = 586` exposes a vertical mirror, not a scale mismatch or motion between frames. Removed the extra CGContext Y flip in `zxRGBA` so screenshot/template search and returned coordinates share the displayed top-left-origin convention. Before rebuilding the native matcher, this fix cannot be validated by the device API; the device still runs the preceding build.
+- The installed game-screen `/api/ocr` responded successfully to direct requests: Vision full-screen 4 and small ROI 1; PaddleOCR full-screen 55 and small ROI 0. This does not establish that the browser click visibly rendered a result. The dashboard now mirrors OCR progress, count and errors into a visible panel-header status while keeping detailed text in the scrollable list. Added zero-result/error UI assertions and RGBA orientation source assertions.
+- 56 local Python tests, Node `vm.Script` parsing and changed-file whitespace checks pass. No commit, push or build in this follow-up. Experience receipts: `q-aef7cb164c16`, `q-32bbb3912113` (no matches).
