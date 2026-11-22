@@ -200,11 +200,11 @@ static NSString *ZXDashboardIPAddress(void)
     if (connect(socketHandle, (struct sockaddr *)&address, sizeof(address)) != 0) { close(socketHandle); self.lastError = @"连接 ZXTouch 本机服务失败。"; return @"-1"; }
     NSString *down = [NSString stringWithFormat:@"101101%05d%05d\r\n", x, y];
     NSString *up = [NSString stringWithFormat:@"101001%05d%05d\r\n", x, y];
-    BOOL sent = send(socketHandle, down.UTF8String, down.lengthOfBytesUsingEncoding:NSUTF8StringEncoding, 0) >= 0;
+    BOOL sent = send(socketHandle, down.UTF8String, [down lengthOfBytesUsingEncoding:NSUTF8StringEncoding], 0) >= 0;
     uint32_t delay = minDelay;
     if (sent && maxDelay > minDelay) delay += arc4random_uniform(maxDelay - minDelay + 1);
     if (sent && delay) usleep(delay * 1000);
-    if (sent) sent = send(socketHandle, up.UTF8String, up.lengthOfBytesUsingEncoding:NSUTF8StringEncoding, 0) >= 0;
+    if (sent) sent = send(socketHandle, up.UTF8String, [up lengthOfBytesUsingEncoding:NSUTF8StringEncoding], 0) >= 0;
     close(socketHandle);
     if (!sent) { self.lastError = @"触摸指令未发送。"; return @"-1"; }
     self.lastError = @"";
