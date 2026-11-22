@@ -37,7 +37,13 @@ pid_t system2Cancelable(const char *command, int *infp, int *outfp,
                         pid_t *processGroup, volatile sig_atomic_t *cancelRequested);
 int call_system(const char *cmd);
 void zxAppendRuntimeLog(NSString *text);
+#ifdef __cplusplus
+extern "C" {
+#endif
 Boolean zxPathLooksExecutable(const char *path);
+#ifdef __cplusplus
+}
+#endif
 int roundUp(int numToRound, int multiple);
 Boolean isIpad();
 NSString* getDeviceName();
