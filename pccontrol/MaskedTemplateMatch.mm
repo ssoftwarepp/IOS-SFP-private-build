@@ -62,9 +62,12 @@ NSData *zxMaskedTemplateMatches(NSDictionary *request, NSError **error) {
         if (error) *error = zxMatchError(@"invalid threshold, scales or maxResults");
         return nil;
     }
-    CGImageRef screenshot = [Screen createScreenShotCGImageRef];
+    NSString *snapshotPath = request[@"screenshot"];
+    UIImage *snapshot = snapshotPath ? [UIImage imageWithContentsOfFile:snapshotPath] : nil;
+    if (snapshotPath && !snapshot.CGImage) { if (error) *error = zxMatchError(@"snapshot decode failed"); return nil; }
+    CGImageRef screenshot = snapshotPath ? CGImageRetain(snapshot.CGImage) : [Screen createScreenShotCGImageRef];
     if (!screenshot) { if (error) *error = zxMatchError(@"screen capture failed"); return nil; }
-    int orientation = [Screen getScreenOrientation];
+    int orientation = snapshotPath ? 1 : [Screen getScreenOrientation];
     UIImageOrientation turn = orientation == 4 ? UIImageOrientationRight :
                               orientation == 3 ? UIImageOrientationLeft :
                               orientation == 2 ? UIImageOrientationDown : UIImageOrientationUp;

@@ -74,6 +74,12 @@ class PaddlePackageLayoutTests(unittest.TestCase):
         self.assertLess(workflow.index('python3 ocrworker/verify_package.py "$DEB"'),
                         workflow.index('name: Upload Rootless deb'))
 
+    def test_degenerate_detected_boxes_do_not_abort_ocr(self):
+        source = (ROOT / "ocrworker/PaddleOCR.mm").read_text(encoding="utf-8")
+        self.assertIn('if (!std::isfinite(boxW) || !std::isfinite(boxH) || boxW < 1 || boxH < 1) continue;', source)
+        self.assertIn('if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return cv::Mat();', source)
+        self.assertIn('if (line.empty()) continue;', source)
+
     def test_worker_and_models_enter_package(self):
         root_make = (ROOT / "Makefile").read_text(encoding="utf-8")
         worker_make = (ROOT / "ocrworker/Makefile").read_text(encoding="utf-8")

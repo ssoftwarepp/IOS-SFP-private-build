@@ -160,6 +160,9 @@ std::vector<Quad> detect(Runtime &runtime, const cv::Mat &image) {
             p.x = std::clamp(p.x * image.cols / w, 0.f, (float)image.cols - 1);
             p.y = std::clamp(p.y * image.rows / h, 0.f, (float)image.rows - 1);
         }
+        float boxW = std::max(cv::norm(q[0] - q[1]), cv::norm(q[2] - q[3]));
+        float boxH = std::max(cv::norm(q[0] - q[3]), cv::norm(q[1] - q[2]));
+        if (!std::isfinite(boxW) || !std::isfinite(boxH) || boxW < 1 || boxH < 1) continue;
         boxes.push_back(q);
     }
     require(boxes.size() <= 128, "too many text lines (limit 128); use a smaller region");
@@ -177,7 +180,7 @@ std::vector<Quad> detect(Runtime &runtime, const cv::Mat &image) {
 cv::Mat crop(const cv::Mat &image, const Quad &q) {
     int w = std::max(cv::norm(q[0] - q[1]), cv::norm(q[2] - q[3]));
     int h = std::max(cv::norm(q[0] - q[3]), cv::norm(q[1] - q[2]));
-    require(w > 0 && h > 0 && w <= 8192 && h <= 8192, "invalid detected text crop");
+    if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return cv::Mat();
     Quad target{{{0, 0}, {(float)w, 0}, {(float)w, (float)h}, {0, (float)h}}};
     auto transform = cv::getPerspectiveTransform(q.data(), target.data());
     cv::Mat result;
@@ -249,6 +252,7 @@ cv::Mat crop(const cv::Mat &image, const Quad &q) {
         require(std::isfinite(minConfidence) && minConfidence >= 0 && minConfidence <= 1, "invalid confidence threshold");
         for (const auto &box : boxes) {
             cv::Mat line = crop(region, box), resized;
+            if (line.empty()) continue;
             int contentW = std::max(1, (int)ceil(48. * line.cols / line.rows));
             require(contentW <= 2048, "text line too wide (2048 normalized pixels); use a smaller region");
             int inputW = std::max(320, contentW);

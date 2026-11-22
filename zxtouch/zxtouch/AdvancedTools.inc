@@ -68,6 +68,16 @@
         }
         NSMutableDictionary *parameters = [NSMutableDictionary dictionaryWithObject:paths forKey:@"templates"];
         if (maskEntries) parameters[@"masks"] = maskPaths;
+        NSString *snapshot = body[@"snapshot"];
+        if (snapshot) {
+            if (![snapshot isKindOfClass:NSString.class] || ![owner isSafeAssetFileName:snapshot] ||
+                ![snapshot.pathExtension.lowercaseString isEqualToString:@"png"])
+                return [owner jsonResponse:@{ @"ok": @NO, @"error": @"截图名称无效" } status:400];
+            NSString *path = [[standalone stringByAppendingPathComponent:snapshot] stringByResolvingSymlinksInPath];
+            if (![path hasPrefix:[standalone stringByAppendingString:@"/"]] || ![[NSFileManager defaultManager] fileExistsAtPath:path])
+                return [owner jsonResponse:@{ @"ok": @NO, @"error": @"截图不存在" } status:404];
+            parameters[@"screenshot"] = path;
+        }
         for (NSString *key in @[@"threshold", @"maxResults", @"minScale", @"maxScale", @"steps"]) {
             id value = body[key];
             if (value) {

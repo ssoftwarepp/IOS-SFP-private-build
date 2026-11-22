@@ -34,3 +34,16 @@ Experience lookup receipts: global `q-e354d2a7570d`, local `q-a2ac572fc03f`; thi
 - Source changes after the successful private build: AX `WebAccessibilityObjectWrapper` nodes now optionally expose returned `AXRoleDescription`, `AXDOMIdentifier`, `AXURL`, `AXPlaceholderValue`; the dashboard tree title displays candidate index, size and position directly. The image workbench has a separate find-image rectangle (drag mode and numeric X/Y/width/height, full-screen reset); OCR results show engine, count, worker PID and persistent errors directly below the OCR button. The existing device build does not contain these latest edits.
 - Local validation: 55 Python tests passed; dashboard inline JavaScript parses with Node `vm.Script`; changed-file diff whitespace check passed. No build or device installation was performed for this follow-up.
 - Experience lookup receipts: global `q-e70d471646c7`, local `q-e67753fba8d2`.
+
+## Game-screen follow-up: 06:06 Asia/Shanghai
+
+- Device `/` serves the updated dashboard with the dedicated search region. The current foreground app is `com.yy.kiwi`. Direct game-screen OCR: Vision returns two full-screen texts, PaddleOCR 39; both return zero inside `[200,400,100,100]`, confirming a zero-hit ROI need not indicate an API failure.
+- Reproduced game-screen template drift: a 48×48 crop from `(250,700)` matched on a subsequent live capture around `(249,583)` at 0.858, while the old tight region `[240,690,68,68]` returned zero. The dashboard now uploads its displayed screenshot as a PNG for optional same-frame matching via the existing native task 33, defaulting to that frame; live matching remains selectable and remains the default for existing script clients.
+- Fixed a dashboard AX render `ReferenceError`: `f` is now declared before its first interpolation. OCR progress/error/zero-result state remains in the result pane, with the selected region shown for zero hits.
+- Local validation: 55 Python tests, Node `vm.Script`, and changed-file diff whitespace checks pass. This follow-up is source-only until built and installed.
+- Experience lookup receipts: global `q-e9bcf570a9df`, local `q-449d54098677` (no matches).
+
+## Degenerate OCR box: 06:16 Asia/Shanghai
+
+- A game-screen request produced `OCR_RESPONSE_INVALID: PaddleOCR: invalid detected text crop`. Detection clamps each quad corner to screenshot boundaries; a pathological contour may collapse to zero width or height. Filter degenerate/nonfinite boxes before recognition and skip empty crop results instead of aborting the full page.
+- Source-oriented regression asserts all three guards. Local Python tests: 56 passed; inline dashboard JS syntax and changed-file whitespace checks pass. Worker fix takes effect only after installing a newly built package.
