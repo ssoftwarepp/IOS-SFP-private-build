@@ -15,13 +15,12 @@ static bool transfer(int fd, void *bytes, size_t length, bool writing) {
     while (length) {
         pollfd f{fd, (short)(writing ? POLLOUT : POLLIN), 0};
         int ready;
-        do { ready = poll(&f, 1, 60000); } while (ready < 0 && errno == EINTR);
+        do { ready = poll(&f, 1, -1); } while (ready < 0 && errno == EINTR);
         if (ready < 0 && errno == EPERM && fd < FD_SETSIZE) {
             do {
                 fd_set descriptors; FD_ZERO(&descriptors); FD_SET(fd, &descriptors);
-                struct timeval timeout = {60, 0};
                 ready = select(fd + 1, writing ? nullptr : &descriptors,
-                               writing ? &descriptors : nullptr, nullptr, &timeout);
+                               writing ? &descriptors : nullptr, nullptr, nullptr);
             } while (ready < 0 && errno == EINTR);
         }
         if (ready <= 0) return false; // Idle shutdown releases both model sessions.

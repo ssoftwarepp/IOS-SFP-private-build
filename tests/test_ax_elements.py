@@ -68,7 +68,7 @@ class AXProtocolTests(unittest.TestCase):
         self.assertIn("getFrontMostApplication()", lookup)
         self.assertIn("if ([NSThread isMainThread]) readForegroundPID();", source)
         self.assertIn("else dispatch_sync(dispatch_get_main_queue(), readForegroundPID);", source)
-        self.assertIn('tree = zxNode(application, 0, &count, &candidateCount);', source)
+        self.assertIn('tree = zxNode(application, 0, &count, &candidateCount, &limitReached);', source)
         self.assertIn('else dispatch_sync(dispatch_get_main_queue(), capture);', source)
         self.assertIn('if (attempt < 3 && ![NSThread isMainThread]) usleep(delays[attempt]);', source)
 
@@ -91,9 +91,10 @@ class AXProtocolTests(unittest.TestCase):
         for left, right, display in (("getpid()", "pid", 1), ("pid", "getpid()", 1),
                                      ("getpid()", "pid", 0), ("pid", "getpid()", 0)):
             self.assertIn(f"associate({left}, {right}, {display});", source)
-        self.assertIn('CFTypeRef rawWindows = zxNumericAttribute(application, 5001);', source)
-        self.assertIn('zxAppendCandidates(window, windowChildren, seen, count, candidateCount);', source)
-        self.assertIn('zxAppendCandidates(application, children, seen, count, candidateCount);', source)
+        self.assertIn('zxNumericAttribute(application, 5001) : NULL;', source)
+        self.assertIn('zxWalkChildren(application, root, @"root", depth, deadline', source)
+        self.assertIn('zxAppendCandidates((__bridge CFTypeRef)item[@"element"]', source)
+        self.assertIn('root[@"children"] = children;', source)
         self.assertIn('pid, [details componentsJoinedByString:', source)
 
     def test_empty_tree_reports_numeric_ax_attribute_results(self):
@@ -111,7 +112,7 @@ class AXProtocolTests(unittest.TestCase):
                   "AccessibilityTree.xm").read_text(encoding="utf-8")
         self.assertIn("static const NSUInteger zxMaxCandidates = 2000;", source)
         self.assertIn('@"candidateCount": @(candidateCount)', source)
-        self.assertIn('@"limitReached": @(candidateCount >= zxMaxCandidates)', source)
+        self.assertIn('@"limitReached": @(limitReached)', source)
         self.assertIn("if (setTimeout) setTimeout(application, 0.5f);", source)
         for attribute in (2001, 2003, 2006, 5003, 5019):
             self.assertIn(f"zxNumericAttribute(element, {attribute})" if attribute in (2003, 5003)
@@ -127,11 +128,40 @@ class AXProtocolTests(unittest.TestCase):
         self.assertIn("NSNumber *bucketKey = @(CFHash(element));", source)
         self.assertIn("CFEqual(element, (__bridge CFTypeRef)previous)", source)
         self.assertIn("!zxRememberElement(candidate, seen)", source)
-        self.assertIn("!zxRememberElement(window, seen)", source)
+        self.assertIn("zxRememberElement(window, seen)", source)
+        self.assertIn("!zxRememberElement(child, seen)", source)
         self.assertNotIn("fingerprint", source.lower())
-        self.assertNotIn("zxNode(child,", source)
-        self.assertLess(source.index("zxAppendCandidates(window, windowChildren"),
-                        source.index("zxAppendCandidates(application, children"))
+        self.assertIn('CFSTR("AXChildren")', source)
+        self.assertIn('childNode[@"snapshotPath"] = childPath;', source)
+        self.assertIn('leaf[@"candidateAttribute"] = @(candidateIDs[index]);', source)
+        self.assertIn('leaf[@"candidateIndex"] = @(i);', source)
+        self.assertIn('leaf[@"candidateSourcePath"] = sourcePath;', source)
+        self.assertIn('@"source": @"candidateGroup"', source)
+        self.assertIn('root[@"children"] = children;', source)
+        self.assertIn('zxMaxDepth = 16', source)
+        self.assertIn('zxTreeBudget = 3.0', source)
+        self.assertIn('zxMaxTreeNodes = 2002', source)
+        self.assertLess(source.index('zxWalkChildren(application, root,'),
+                        source.index('zxAppendCandidates((__bridge CFTypeRef)item[@"element"]'))
+
+    def test_candidate_group_keeps_same_label_different_identity_nodes(self):
+        tree = {"pid": 123, "count": 3, "candidateCount": 2, "limitReached": False,
+                "root": {"role": "AXApplication", "source": "application", "children": [
+                    {"role": "AXCandidateGroup", "source": "candidateGroup", "children": [
+                        {"role": "WebAccessibilityObjectWrapper", "label": "继续",
+                         "candidateAttribute": 3015, "candidateIndex": 157,
+                         "candidateSourcePath": "root/windowCandidate[0]",
+                         "snapshotPath": "root/windowCandidate[0]/candidate[3015:157]", "children": []},
+                        {"role": "WebAccessibilityObjectWrapper", "label": "继续",
+                         "candidateAttribute": 3015, "candidateIndex": 162,
+                         "candidateSourcePath": "root/windowCandidate[0]",
+                         "snapshotPath": "root/windowCandidate[0]/candidate[3015:162]", "children": []}
+                    ]}]}}
+        result = make_device([framed_response(tree)]).get_element_tree()
+        matches = make_device([]).find_tree_elements(label="继续", tree=result)
+        self.assertEqual([n["candidateIndex"] for n in matches], [157, 162])
+        self.assertEqual(len({n["snapshotPath"] for n in matches}), 2)
+        self.assertTrue(all(n["candidateSourcePath"] == "root/windowCandidate[0]" for n in matches))
 
     def test_fragmented_unicode_snapshot_and_following_response(self):
         response = framed_response({"jsonrpc": "2.0", "id": 1,

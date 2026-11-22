@@ -115,7 +115,7 @@
             NSDictionary *result = [[ZXPaddleOCRBridge sharedBridge] recognizePNG:png region:region error:&failure];
             if (!result) return [owner jsonResponse:@{ @"ok": @NO, @"error": failure ?: @"PaddleOCR 失败" } status:502];
             return [owner jsonResponse:@{ @"ok": @YES, @"texts": result[@"texts"], @"engine": @"paddleocr",
-                                          @"provider": result[@"provider"] } status:200];
+                                          @"provider": result[@"provider"], @"worker_pid": result[@"worker_pid"] } status:200];
 #else
             return [owner jsonResponse:@{ @"ok": @NO, @"error": @"PaddleOCR 需要 SpringBoard 服务" } status:503];
 #endif

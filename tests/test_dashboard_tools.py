@@ -54,8 +54,11 @@ class DashboardToolsTests(unittest.TestCase):
         for endpoint in ('/api/image/templates', '/api/image/matches', '/api/ax/point', '/api/ocr'):
             self.assertIn(endpoint, html)
         for control in ('axOverlay', 'axImage', 'axCopyCode', 'axDownloadCode',
-                        'standaloneTemplate', 'standaloneMask', 'visionCrop', 'screenExport'):
+                        'standaloneTemplate', 'visionCrop', 'screenExport'):
             self.assertIn('id="{}"'.format(control), html)
+        self.assertNotIn('id="standaloneMask"', html)
+        self.assertIn('showMatches(result)', html)
+        self.assertIn('for (const match of imageMatches)', html)
         self.assertIn('id="ocrFind"', html)
         self.assertIn('id="ocrEngine"', html)
         self.assertIn('`inset_pixels=${Math.max(0, Number(elements.axInsetPx.value) || 0)}`', html)
@@ -67,7 +70,14 @@ class DashboardToolsTests(unittest.TestCase):
         self.assertIn('framedSocketCommand:@"30" mime:@"image/png"', advanced)
         bridge = (ROOT / "pccontrol/PaddleOCRBridge.m").read_text(encoding="utf-8")
         self.assertIn('posix_spawn(&pid', bridge)
-        self.assertIn('ZXOCRTransfer(pair[0]', bridge)
+        self.assertIn('if (_socket >= 0 && _pid > 0) return YES;', bridge)
+        self.assertIn('ZXOCRTransfer(_socket, &responseLength, 4, NO, deadline, &systemError)', bridge)
+        self.assertIn('OCR_%@_%@', bridge)
+        self.assertIn('WEXITSTATUS(childStatus)', bridge)
+        self.assertIn('[self resetWorker]', bridge)
+        worker = (ROOT / "ocrworker/main.mm").read_text(encoding="utf-8")
+        self.assertIn('poll(&f, 1, -1)', worker)
+        self.assertIn('if (!engine) engine =', worker)
         common = (ROOT / "pccontrol/Common.h").read_text(encoding="utf-8")
         self.assertRegex(common, r'extern "C"\s*\{\s*#endif\s*Boolean zxPathLooksExecutable')
         self.assertIn('OCR 识别选区', html)
