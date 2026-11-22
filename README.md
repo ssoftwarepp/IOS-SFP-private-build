@@ -1,6 +1,6 @@
 # IOS-SFP
 
-IOS-SFP 是独立维护的 ZXTouch iOS rootless/roothide 中文分支：在触摸控制与脚本执行基础上增加设备端 AX 查询、图色工具和中文远程控制台。安装、兼容系统、Python API 和历史真机记录见 [README_old.md](README_old.md)。以下区分“源码已有功能”“真机已验证部分”和“尚未完成的 PaddleOCR 集成”，不把依赖文件已落盘等同于可安装功能。
+IOS-SFP 是独立维护的 ZXTouch iOS rootless/roothide 中文分支：在触摸控制与脚本执行基础上增加设备端 AX 查询、图色工具和中文远程控制台。安装、兼容系统、Python API 和历史真机记录见 [README_old.md](README_old.md)。以下区分“源码已有功能”“安装包已验证部分”和“尚未完成的真机 OCR 验收”。
 
 ## 项目已实现的功能
 
@@ -12,8 +12,8 @@ IOS-SFP 是独立维护的 ZXTouch iOS rootless/roothide 中文分支：在触�
 
 ## 尚未实现或验证的部分
 
-- **IOS-SFP 的 PaddleOCR 端到端验收尚未完成**：已接入控制台引擎选择、worker IPC 与资源打包规则；本仓库尚无成功的 iOS 编译、签名、真实 `.deb` 内容检查、设备安装与 OCR 真机记录。参考项目 ios-mcp 的 worker 编译/单测通过不等于本项目通过。
-- **模型部署已有构建规则，仍待安装包核验**：顶层 Makefile 的 `after-stage` 将 `det.onnx`、`rec.onnx`、`dictionary.json` 与 `sha256.json` 复制到 `/usr/share/zxtouch/paddleocr/`，worker 由子项目安装到 `/usr/libexec/zxtouch/`。当前 Windows 环境没有 Theos/Xcode，未产出 IOS-SFP `.deb`。
+- **IOS-SFP 的设备端 OCR 验收尚未完成**：私有仓库 [Actions 构建 45062307131](https://github.com/ssoftwarepp/IOS-SFP-private-build/actions/runs/45062307131) 已通过 App 构建、Rootless/Roothide `.deb` 打包、worker 和模型的实际包内容校验；尚无设备安装和 OCR 真机调用记录。
+- **模型部署已通过安装包校验**：顶层 Makefile 的 `after-stage` 将 `det.onnx`、`rec.onnx`、`dictionary.json` 与 `sha256.json` 复制到 `/usr/share/zxtouch/paddleocr/`，worker 由子项目安装到 `/usr/libexec/zxtouch/`。GitHub Actions 两种方案的产物均通过 `ocrworker/verify_package.py`。
 - **新改版的完整设备验收尚未完成**：iOS 15.8.8 上的 AX 查询与桌面触摸有历史实测；改版控制台的图色/元素工具、任务 33/34 和新 OCR worker 仍需用包含当前改动的 IOS-SFP 安装包验证。任务 32 是 AX 候选集合构成的树，不是完整递归 `AXChildren`/XPath 快照。
 
 ## 目前进度
@@ -21,7 +21,7 @@ IOS-SFP 是独立维护的 ZXTouch iOS rootless/roothide 中文分支：在触�
 1. 已从 ios-mcp 云端运行下载并核验完整 ONNX Runtime/OpenCV 构建归档；把同次运行的完整 iOS runtime 安装树（205 个文件）同步至本仓库，三个 `.a` 与头文件成套匹配。
 2. 已直接下载 `det.onnx` 与 `rec.onnx`；模型、配置和字典五个资源均通过 `sha256.json` 校验。
 3. [ios-mcp 构建运行](https://github.com/ssoftwarepp/ios-mcp/actions/runs/45048102079) 的依赖编译与上传成功，但该项目后续 Rootless `.deb` 步骤失败；该运行没有完整 ios-mcp DEB。
-4. IOS-SFP 已修正 worker 的 Clipper 路径与包标识，加入模型 `after-stage` 复制和 SpringBoard OCR IPC 桥接；控制台可选择 Vision 或 PaddleOCR。CI 已在 Rootless/Roothide 两种包上传前核对 worker 的 arm64 Mach-O 可执行头、iOS 平台标记、执行位与模型摘要。尚需在 Theos/macOS 上构建本仓库 `.deb` 并检查实际包内容及真机结果；当前未提交或推送。
+4. 已将当前源码构建快照推至私有仓库 `ssoftwarepp/IOS-SFP-private-build`，提交 `3e97ae9a0171a596153e5290bb2c97fa5a41fc12`。[Actions 运行 45062307131](https://github.com/ssoftwarepp/IOS-SFP-private-build/actions/runs/45062307131) 成功：App、Rootless/Roothide `.deb` 构建及两次实际包内容校验通过，产物 `IOS-SFP-rootless-deb` 和 `IOS-SFP-roothide-deb` 已上传。验收核对了 worker 的 arm64 Mach-O 可执行头、iOS 平台标记、执行位与四份模型资源摘要。原 `origin` 和当前本地分支的提交历史未改；真机 OCR 尚待执行。
 5. 根据 `D:\codex_data\ajjl\hy\脚本.txt` 最终覆盖的 `FLOW`，实际入口只有 `click_zgd → scan_more`。新增 [横向批量扫描 helper](layout/usr/share/zxtouch/python/zxtouch/batch_scan.py)，组合已有模板匹配、AX 容器定位、分段横扫、按模板索引与容器相对 X 去重、回切、横向查找领取入口和关闭后消失验证。`app_timeout=8` 限制应用回切调用，`scan_timeout=45` 单独限制每批任务扫描和领取入口横扫；调用时使用实际存在的设备端 PNG 路径；MQ 的 `Attachment:` URI 与深层 XPath 不直接兼容，仓库与给定脚本目录均未找到原脚本引用的 `ys_g.png`。
 
 ## 构建后检查
