@@ -144,6 +144,16 @@ class AXProtocolTests(unittest.TestCase):
         self.assertLess(source.index('zxWalkChildren(application, root,'),
                         source.index('zxAppendCandidates((__bridge CFTypeRef)item[@"element"]'))
 
+    def test_webkit_proxy_optional_metadata_preserves_real_values(self):
+        source = (Path(__file__).resolve().parent.parent / "pccontrol" /
+                  "AccessibilityTree.xm").read_text(encoding="utf-8")
+        self.assertIn('if ([node[@"elementType"] isEqualToString:@"WebAccessibilityObjectWrapper"])', source)
+        for attribute in ("AXRoleDescription", "AXDOMIdentifier", "AXURL", "AXPlaceholderValue"):
+            self.assertIn('@"{}"'.format(attribute), source)
+        self.assertIn('CFGetTypeID(raw) == CFURLGetTypeID()', source)
+        self.assertIn('if (text.length) node[key] = text;', source)
+        self.assertIn('node[key] = [(__bridge NSURL *)raw absoluteString];', source)
+
     def test_candidate_group_keeps_same_label_different_identity_nodes(self):
         tree = {"pid": 123, "count": 3, "candidateCount": 2, "limitReached": False,
                 "root": {"role": "AXApplication", "source": "application", "children": [

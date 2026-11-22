@@ -150,6 +150,19 @@ static NSMutableDictionary *zxLeafNode(CFTypeRef element)
     }
     NSDictionary *frame = zxFrame(element);
     if (frame) node[@"frame"] = frame;
+    if ([node[@"elementType"] isEqualToString:@"WebAccessibilityObjectWrapper"]) {
+        for (NSString *key in @[@"AXRoleDescription", @"AXDOMIdentifier", @"AXURL", @"AXPlaceholderValue"]) {
+            CFTypeRef raw = zxAttribute(element, (__bridge CFStringRef)key);
+            if (!raw) continue;
+            if (CFGetTypeID(raw) == CFStringGetTypeID()) {
+                NSString *text = (__bridge NSString *)raw;
+                if (text.length) node[key] = text;
+            } else if (CFGetTypeID(raw) == CFURLGetTypeID()) {
+                node[key] = [(__bridge NSURL *)raw absoluteString];
+            }
+            CFRelease(raw);
+        }
+    }
     node[@"children"] = @[];
     return node;
 }

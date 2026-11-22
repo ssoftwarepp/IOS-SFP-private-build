@@ -59,6 +59,12 @@ class DashboardToolsTests(unittest.TestCase):
         self.assertNotIn('id="standaloneMask"', html)
         self.assertIn('showMatches(result)', html)
         self.assertIn('for (const match of imageMatches)', html)
+        for control in ('searchX', 'searchY', 'searchWidth', 'searchHeight', 'searchClear', 'visionModeSearch'):
+            self.assertIn('id="{}"'.format(control), html)
+        self.assertIn('region: imageSearchRegion()', html)
+        self.assertIn("visionMode === 'search'", html)
+        self.assertIn('elements.ocrResults.textContent = `${label}失败：${error.message}`', html)
+        self.assertIn('node.candidateAttribute ? ` [${node.candidateAttribute}:${node.candidateIndex}]`', html)
         self.assertIn('id="ocrFind"', html)
         self.assertIn('id="ocrEngine"', html)
         self.assertIn('`inset_pixels=${Math.max(0, Number(elements.axInsetPx.value) || 0)}`', html)
