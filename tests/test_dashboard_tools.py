@@ -79,7 +79,7 @@ class DashboardToolsTests(unittest.TestCase):
         self.assertIn('poll(&f, 1, -1)', worker)
         self.assertIn('if (!engine) engine =', worker)
         common = (ROOT / "pccontrol/Common.h").read_text(encoding="utf-8")
-        self.assertRegex(common, r'extern "C"\s*\{\s*#endif\s*Boolean zxPathLooksExecutable')
+        self.assertRegex(common, r'extern "C"\s*\{\s*#endif\s*void zxAppendRuntimeLog\(NSString \*text\);\s*Boolean zxPathLooksExecutable')
         self.assertIn('OCR 识别选区', html)
         self.assertIn('Math.random()', html)
         self.assertIn('candidateAttribute', html)

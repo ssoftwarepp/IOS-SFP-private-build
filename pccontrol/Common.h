@@ -36,10 +36,10 @@ pid_t system2(const char *command, int *infp, int *outfp);
 pid_t system2Cancelable(const char *command, int *infp, int *outfp,
                         pid_t *processGroup, volatile sig_atomic_t *cancelRequested);
 int call_system(const char *cmd);
-void zxAppendRuntimeLog(NSString *text);
 #ifdef __cplusplus
 extern "C" {
 #endif
+void zxAppendRuntimeLog(NSString *text);
 Boolean zxPathLooksExecutable(const char *path);
 #ifdef __cplusplus
 }
