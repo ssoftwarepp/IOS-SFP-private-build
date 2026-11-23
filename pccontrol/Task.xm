@@ -14,6 +14,9 @@
 #include "DeviceInfo.h"
 #include "TouchIndicator/TouchIndicatorWindow.h"
 #import <mach/mach.h>
+#import <libproc.h>
+#import <signal.h>
+#import <errno.h>
 #include <Foundation/NSDistributedNotificationCenter.h>
 #include <TextRecognization/TextRecognizer.h>
 #include "UpdateCache.h"
@@ -503,6 +506,44 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
                     CGImageRelease(screenshot);
                 }
             }
+        }
+    }
+    else if (taskType == TASK_KILL_PROCESS)
+    {
+        @autoreleasepool {
+            NSString *name = [NSString stringWithUTF8String:(const char *)eventData];
+            if (!name.length || [name rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound ||
+                [name rangeOfString:@";;"].location != NSNotFound) {
+                notifyClient((UInt8 *)"-1;;Invalid process name\r\n", writeStreamRef);
+                return;
+            }
+            int bytes = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+            if (bytes <= 0) {
+                notifyClient((UInt8 *)"-1;;Unable to list processes\r\n", writeStreamRef);
+                return;
+            }
+            NSMutableData *buffer = [NSMutableData dataWithLength:(NSUInteger)bytes + 1024 * sizeof(pid_t)];
+            int used = proc_listpids(PROC_ALL_PIDS, 0, buffer.mutableBytes, (int)buffer.length);
+            if (used < 0) {
+                notifyClient((UInt8 *)"-1;;Unable to list processes\r\n", writeStreamRef);
+                return;
+            }
+            NSUInteger killed = 0;
+            int failure = 0;
+            pid_t *pids = (pid_t *)buffer.mutableBytes;
+            for (int i = 0; i < used / (int)sizeof(pid_t); ++i) {
+                pid_t pid = pids[i];
+                if (pid <= 1 || pid == getpid()) continue;
+                char executable[PROC_PIDPATHINFO_MAXSIZE] = {0};
+                if (proc_pidpath(pid, executable, sizeof(executable)) <= 0) continue;
+                NSString *path = [NSString stringWithUTF8String:executable];
+                if (![path.lastPathComponent isEqualToString:name]) continue;
+                if (kill(pid, SIGTERM) == 0) ++killed;
+                else if (!failure) failure = errno;
+            }
+            NSString *reply = failure ? [NSString stringWithFormat:@"-1;;signal failed: %d\r\n", failure] :
+                                        [NSString stringWithFormat:@"0;;%lu\r\n", (unsigned long)killed];
+            notifyClient((UInt8 *)reply.UTF8String, writeStreamRef);
         }
     }
     else if (taskType == TASK_UPDATE_CACHE)

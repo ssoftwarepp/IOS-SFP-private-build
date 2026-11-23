@@ -1,5 +1,7 @@
 import time
 import socket
+import math
+from contextlib import contextmanager
 from zxtouch import tasktypes
 from zxtouch import datahandler
 from zxtouch import kbdtasktypes
@@ -14,6 +16,34 @@ class zxtouch:
         self.s.connect((str(ip), 6000))
         time.sleep(0.1)
 
+    @contextmanager
+    def _ax_deadline(self, timeout):
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+            raise ValueError("AX timeout must be a finite number of seconds greater than zero")
+        previous = self.s.gettimeout()
+        self._ax_deadline_at = time.monotonic() + timeout
+        timed_out = False
+        try:
+            self._ax_remaining()
+            yield
+            self._ax_remaining()
+        except (socket.timeout, TimeoutError):
+            timed_out = True
+            self.s.close()
+            raise TimeoutError("ZXTouch AX query exceeded {} seconds; reconnect the client".format(timeout)) from None
+        finally:
+            del self._ax_deadline_at
+            if not timed_out:
+                self.s.settimeout(previous)
+
+    def _ax_remaining(self):
+        deadline = getattr(self, "_ax_deadline_at", None)
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("AX query deadline exceeded")
+            self.s.settimeout(remaining)
+
     def _recv_line(self):
         """Receive one CRLF-terminated protocol line without losing extra bytes."""
         delimiter = b"\r\n"
@@ -25,6 +55,7 @@ class zxtouch:
                 del self._recv_buffer[:line_end]
                 return line
 
+            self._ax_remaining()
             chunk = self.s.recv(4096)
             if not chunk:
                 raise ConnectionError("ZXTouch connection closed before a complete response header was received")
@@ -39,6 +70,7 @@ class zxtouch:
 
         while len(self._recv_buffer) < size:
             remaining = size - len(self._recv_buffer)
+            self._ax_remaining()
             chunk = self.s.recv(remaining)
             if not chunk:
                 raise ConnectionError(
@@ -124,6 +156,16 @@ class zxtouch:
         """
         self.s.send(datahandler.format_socket_data(tasktypes.TASK_PROCESS_BRING_FOREGROUND, bundle_identifier))
         return self._recv_response()
+
+    def kill_process(self, name):
+        """Send SIGTERM to processes with exactly this executable name."""
+        if not isinstance(name, str) or not name or ";;" in name or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
+            raise ValueError("name must be a nonempty process executable name")
+        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_KILL_PROCESS, name))
+        success, result = self._recv_response()
+        if not success:
+            return False, result
+        return True, int(result[0])
 
     def show_alert_box(self, title, content, duration):
         """Show alert box on device
@@ -391,6 +433,16 @@ class zxtouch:
             return False, result[1]
         return True, result[1][0]
 
+    def get_foreground_app(self):
+        """Return the current foreground application's bundle identifier."""
+        self.s.sendall(datahandler.format_socket_data(
+            tasktypes.TASK_GET_DEVICE_INFO,
+            deviceinfotasktypes.DEVICE_INFO_TASK_GET_RUNTIME_STATUS))
+        success, result = self._recv_response()
+        if not success:
+            return False, result
+        return True, result[0]
+
     def get_device_info(self):
         """Get information of the device
 
@@ -481,8 +533,13 @@ class zxtouch:
 
         return True, result[1]
 
-    def get_ui_elements(self):
-        """Return the native AX snapshot from the on-device ios-mcp service."""
+    def get_ui_elements(self, timeout=10):
+        """Return the ios-mcp AX snapshot within timeout seconds."""
+        with self._ax_deadline(timeout):
+            return self._get_ui_elements()
+
+    def _get_ui_elements(self):
+        """Read the native AX snapshot from the on-device ios-mcp service."""
         from zxtouch.ax import decode_mcp_elements
 
         self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_ACCESSIBILITY_TREE))
@@ -516,9 +573,10 @@ class zxtouch:
             raise RuntimeError("Invalid JSON response length")
         return json.loads(self._recv_exact(length))
 
-    def get_element_at_point(self, x, y):
-        """Hit-test a single AX element using logical screen point coordinates."""
-        return self._json_query(tasktypes.TASK_ACCESSIBILITY_AT_POINT, {"x": x, "y": y})
+    def get_element_at_point(self, x, y, timeout=10):
+        """Hit-test a logical screen point within timeout seconds."""
+        with self._ax_deadline(timeout):
+            return self._json_query(tasktypes.TASK_ACCESSIBILITY_AT_POINT, {"x": x, "y": y})
 
     def match_templates(self, templates, *, masks=None, region=None, threshold=0.85,
                         max_results=30, min_scale=1, max_scale=1, steps=1):
@@ -532,8 +590,12 @@ class zxtouch:
             payload["region"] = list(region)
         return self._json_query(tasktypes.TASK_MASKED_TEMPLATE_MATCH, payload)
 
-    def get_element_tree(self):
-        """Return the frontmost application's native AX hierarchy."""
+    def get_element_tree(self, timeout=10):
+        """Return the frontmost application's AX hierarchy within timeout seconds."""
+        with self._ax_deadline(timeout):
+            return self._get_element_tree()
+
+    def _get_element_tree(self):
         import json
 
         self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_ACCESSIBILITY_HIERARCHY))
@@ -555,19 +617,19 @@ class zxtouch:
         return tree
 
     def find_tree_elements(self, *, identifier=None, label=None, value=None,
-                           role=None, tree=None):
+                           role=None, tree=None, timeout=10):
         """Find nodes recursively by their native AX attributes."""
         from zxtouch.ax import find_tree_elements
         if tree is None:
-            tree = self.get_element_tree()
+            tree = self.get_element_tree(timeout=timeout)
         return find_tree_elements(tree, identifier=identifier, label=label,
                                   value=value, role=role)
 
-    def find_elements(self, *, text=None, type=None, clickable=None, snapshot=None):
+    def find_elements(self, *, text=None, type=None, clickable=None, snapshot=None, timeout=10):
         """Find native AX nodes with all supplied attributes matched exactly."""
         from zxtouch.ax import find_elements
         if snapshot is None:
-            snapshot = self.get_ui_elements()
+            snapshot = self.get_ui_elements(timeout=timeout)
         return find_elements(snapshot, text=text, type=type, clickable=clickable)
 
     def disconnect(self):

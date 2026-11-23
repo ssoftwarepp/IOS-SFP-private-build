@@ -1,7 +1,9 @@
 import json
 import os
 from pathlib import Path
+import socket
 import sys
+from unittest.mock import patch
 import unittest
 
 
@@ -18,6 +20,17 @@ class ChunkedSocket:
     def __init__(self, chunks):
         self.chunks = list(chunks)
         self.sent = []
+        self.timeout = None
+        self.closed = False
+
+    def gettimeout(self):
+        return self.timeout
+
+    def settimeout(self, timeout):
+        self.timeout = timeout
+
+    def close(self):
+        self.closed = True
 
     def sendall(self, data):
         self.sent.append(data)
@@ -221,6 +234,46 @@ class AXProtocolTests(unittest.TestCase):
         server = (Path(__file__).resolve().parent.parent / "pccontrol" /
                   "Task.xm").read_text(encoding="utf-8")
         self.assertIn("notifyClientData((const UInt8 *)[treeData bytes]", server)
+
+    def test_ax_query_restores_previous_socket_timeout(self):
+        device = make_device([framed_response({"root": {"role": "AXApplication"}})])
+        device.s.settimeout(25)
+        self.assertEqual(device.get_element_tree(timeout=2)["root"]["role"], "AXApplication")
+        self.assertEqual(device.s.gettimeout(), 25)
+        self.assertFalse(device.s.closed)
+
+    def test_ax_query_timeout_closes_connection(self):
+        device = make_device([])
+        with patch.object(device.s, "recv", side_effect=socket.timeout):
+            with self.assertRaisesRegex(TimeoutError, "reconnect"):
+                device.get_element_tree(timeout=0.1)
+        self.assertTrue(device.s.closed)
+
+    def test_ax_query_rejects_invalid_timeout(self):
+        device = make_device([])
+        for timeout in (0, -1, float("nan"), float("inf"), "10", True):
+            with self.subTest(timeout=timeout), self.assertRaises(ValueError):
+                device.get_ui_elements(timeout=timeout)
+        self.assertEqual(device.s.sent, [])
+
+    def test_ax_deadline_covers_fragmented_response(self):
+        device = make_device([framed_response({"root": {"role": "AXApplication"}})[:5]])
+        with patch("zxtouch.client.time.monotonic", side_effect=[10, 10, 10, 12]):
+            with self.assertRaisesRegex(TimeoutError, "reconnect"):
+                device.get_element_tree(timeout=1)
+        self.assertTrue(device.s.closed)
+
+    def test_element_at_point_uses_timeout(self):
+        device = make_device([framed_response({"pid": 1, "element": {"role": "AXButton"}})])
+        self.assertEqual(device.get_element_at_point(10, 20, timeout=3)["element"]["role"], "AXButton")
+        self.assertEqual(device.s.gettimeout(), None)
+
+    def test_filter_methods_pass_timeout_when_fetching(self):
+        device = make_device([framed_response({"root": {"role": "AXButton", "children": []}})])
+        self.assertEqual(len(device.find_tree_elements(role="AXButton", timeout=2)), 1)
+        with patch.object(device, "get_ui_elements", return_value={"elements": []}) as get_ui:
+            self.assertEqual(device.find_elements(text="missing", timeout=3), [])
+            get_ui.assert_called_once_with(timeout=3)
 
     def test_hierarchy_error_preserves_native_error_code(self):
         source = (Path(__file__).resolve().parent.parent / "pccontrol" /
