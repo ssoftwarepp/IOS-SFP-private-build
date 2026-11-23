@@ -31,6 +31,7 @@
 #define TASK_MASKED_TEMPLATE_MATCH 33
 #define TASK_ACCESSIBILITY_AT_POINT 34
 #define TASK_KILL_PROCESS 35
+#define TASK_SHOW_SCRIPT_SETTINGS 36
 
 
 // Used only by zxtouch-runner on its own connection. See Runner.h.

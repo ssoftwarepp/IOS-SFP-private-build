@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>脚本设置</title>
+<style>
+:root{font-family:-apple-system,BlinkMacSystemFont,sans-serif;color-scheme:light dark}
+body{margin:0;padding:24px;background:Canvas;color:CanvasText}
+h1{font-size:22px;margin:0 0 24px}
+label{display:block;font-size:15px;margin:20px 0 6px}
+input,select{box-sizing:border-box;width:100%;min-height:44px;padding:8px 12px;font:inherit;border:1px solid #9299a4;border-radius:6px;background:Canvas;color:CanvasText}
+.row{display:flex;align-items:center;gap:12px}.row input{width:22px;min-height:22px}
+</style>
+</head>
+<body>
+<h1>运行参数</h1>
+<label for="account">账号</label><input id="account" autocomplete="off">
+<label for="loops">循环次数</label><input id="loops" type="number" min="1" value="1">
+<label for="mode">模式</label><select id="mode"><option value="normal">标准</option><option value="fast">快速</option></select>
+<label class="row"><input id="notify" type="checkbox">完成后提示</label>
+<script src="settings.js"></script>
+</body>
+</html>

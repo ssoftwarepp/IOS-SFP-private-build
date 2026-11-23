@@ -2,7 +2,7 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = pccontrol
 
-pccontrol_FILES = Tweak.xm SocketServer.xm Touch.xm Screen.xm Task.xm AccessibilityTree.xm MaskedTemplateMatch.mm PaddleOCRBridge.m Process.xm AlertBox.xm Common.xm Record.xm Play.xm Window.xm Popup.xm Toast.xm UIKeyboard.xm DeviceInfo.xm TouchIndicator/TouchIndicatorWindow.xm TouchIndicator/TouchIndicatorView.xm TouchIndicator/TouchIndicatorCoordinateView.xm TouchIndicator/TouchIndicatorViewList.xm ScriptPlayer.xm Runner.xm TextRecognization/VKOcrManager.xm TextRecognization/TextRecognizer.xm UpdateCache.xm ColorPicker.xm TemplateMatch.xm ScreenMatch.xm \
+pccontrol_FILES = Tweak.xm SocketServer.xm Touch.xm Screen.xm Task.xm AccessibilityTree.xm MaskedTemplateMatch.mm PaddleOCRBridge.m Process.xm AlertBox.xm Common.xm Record.xm Play.xm ScriptSettings.xm Window.xm Popup.xm Toast.xm UIKeyboard.xm DeviceInfo.xm TouchIndicator/TouchIndicatorWindow.xm TouchIndicator/TouchIndicatorView.xm TouchIndicator/TouchIndicatorCoordinateView.xm TouchIndicator/TouchIndicatorViewList.xm ScriptPlayer.xm Runner.xm TextRecognization/VKOcrManager.xm TextRecognization/TextRecognizer.xm UpdateCache.xm ColorPicker.xm TemplateMatch.xm ScreenMatch.xm \
 	../zxtouch/zxtouch/RemoteDashboardServer.m \
 	../zxtouch/zxtouch/GCDWebServer/Core/GCDWebServerResponse.m \
 	../zxtouch/zxtouch/GCDWebServer/Core/GCDWebServerRequest.m \
@@ -26,7 +26,7 @@ pccontrol_CFLAGS = -Wno-error -Wno-module-import-in-extern-c -fobjc-arc \
 	-I../zxtouch/zxtouch/GCDWebServer/Core \
 	-I../zxtouch/zxtouch/GCDWebServer/Responses \
 	-I../zxtouch/zxtouch/GCDWebServer/Requests
-pccontrol_FRAMEWORKS = UIKit AssetsLibrary AVFoundation CoreMedia CoreVideo IOSurface IOMobileFramebuffer Accelerate MobileCoreServices Vision CoreImage ImageIO
+pccontrol_FRAMEWORKS = UIKit WebKit AssetsLibrary AVFoundation CoreMedia CoreVideo IOSurface IOMobileFramebuffer Accelerate MobileCoreServices Vision CoreImage ImageIO
 pccontrol_ARCHS = arm64 arm64e
 
 pccontrol_PRIVATE_FRAMEWORKS = IOKit

@@ -24,6 +24,7 @@
 #include "Runner.h"
 #include "AccessibilityTree.h"
 #include "MaskedTemplateMatch.h"
+#import "ScriptSettings.h"
 
 extern CFRunLoopRef recordRunLoop;
 
@@ -506,6 +507,18 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
                     CGImageRelease(screenshot);
                 }
             }
+        }
+    }
+    else if (taskType == TASK_SHOW_SCRIPT_SETTINGS)
+    {
+        NSString *path = [NSString stringWithUTF8String:(const char *)eventData];
+        if (!zxScriptHasSettings(path)) {
+            notifyClient((UInt8 *)"-1;;Script settings page not found\r\n", writeStreamRef);
+        } else if (!zxReserveScriptSettings()) {
+            notifyClient((UInt8 *)"-1;;Settings page is already active\r\n", writeStreamRef);
+        } else {
+            zxPresentScriptSettings(path, NO, nil);
+            notifyClient((UInt8 *)"0\r\n", writeStreamRef);
         }
     }
     else if (taskType == TASK_KILL_PROCESS)

@@ -7,6 +7,7 @@
 #include "Toast.h"
 #include "Common.h"
 #include "Config.h"
+#import "ScriptSettings.h"
 #import <UIKit/UIKit.h>
 
 #define BTN_H 40
@@ -228,7 +229,8 @@ void applyPanelDarkMode(BOOL dark) {
         [btn setTitle:item[@"label"] forState:UIControlStateNormal];
         btn.titleLabel.font = [UIFont systemFontOfSize:13];
         btn.contentHorizontalAlignment = UIControlContentHorizontalAlignmentLeft;
-        btn.frame = CGRectMake(8, y, pw - 16, BTN_H);
+        BOOL hasCustomSettings = [item[@"action"] isEqualToString:@"play"] && zxScriptHasSettings(item[@"path"]);
+        btn.frame = CGRectMake(8, y, pw - (hasCustomSettings ? 58 : 16), BTN_H);
         btn.backgroundColor = [UIColor secondarySystemBackgroundColor];
         btn.layer.cornerRadius = 8;
         btn.layer.borderColor = [UIColor separatorColor].CGColor;
@@ -324,6 +326,19 @@ void applyPanelDarkMode(BOOL dark) {
             }] forControlEvents:UIControlEventTouchUpInside];
         }
         [_scriptScrollView addSubview:btn];
+        if (hasCustomSettings) {
+            UIButton *settings = [UIButton buttonWithType:UIButtonTypeSystem];
+            settings.frame = CGRectMake(pw - 46, y, 38, BTN_H);
+            [settings setImage:panelSymbol(@"slider.horizontal.3") forState:UIControlStateNormal];
+            settings.tintColor = UIColor.systemBlueColor;
+            settings.accessibilityLabel = @"脚本设置";
+            NSString *path = item[@"path"];
+            [settings addAction:[UIAction actionWithTitle:@"" image:nil identifier:nil handler:^(__kindof UIAction *action) {
+                [self hide];
+                if (zxReserveScriptSettings()) zxPresentScriptSettings(path, NO, nil);
+            }] forControlEvents:UIControlEventTouchUpInside];
+            [_scriptScrollView addSubview:settings];
+        }
         y += BTN_H + 6;
     }
     _scriptScrollView.contentSize = CGSizeMake(pw, y + 4);

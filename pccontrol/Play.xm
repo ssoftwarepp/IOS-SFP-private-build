@@ -5,12 +5,14 @@
 #include "AlertBox.h"
 #include "Config.h"
 #import "ScriptPlayer.h"
+#import "ScriptSettings.h"
 #include "Common.h"
 #import <CoreFoundation/CoreFoundation.h>
 
 static BOOL switchAppBeforeRunScript = true;
 ScriptPlayer *scriptPlayer;
 static float currentRunSpeed = 1.0f;
+static int zxStartScript(NSString *path, int repeatTime, float playSpeed, float interval, NSError **error);
 
 void initScriptPlayer()
 {
@@ -67,13 +69,40 @@ int playScriptWithSettings(UInt8* path, int repeatTime, float playSpeed, float s
         *error = [NSError errorWithDomain:@"com.zjx.zxtouchsp" code:999 userInfo:@{NSLocalizedDescriptionKey:@"-1;;Unable to run the script. Internal error. scriptPlayer is null.\r\n"}];
         return -1;
     }
+    NSString *bundlePath = [NSString stringWithUTF8String:(const char *)path];
+    if (!bundlePath.length) {
+        *error = [NSError errorWithDomain:@"ZXTouch" code:1 userInfo:@{NSLocalizedDescriptionKey:@"-1;;Invalid script path\r\n"}];
+        return -1;
+    }
+    if (isScriptPlaying() || zxScriptSettingsVisible()) {
+        *error = [NSError errorWithDomain:@"ZXTouch" code:2 userInfo:@{NSLocalizedDescriptionKey:@"-1;;Another script or settings page is active\r\n"}];
+        return -1;
+    }
+    if (zxScriptHasSettings(bundlePath)) {
+        if (!zxReserveScriptSettings()) {
+            *error = [NSError errorWithDomain:@"ZXTouch" code:2 userInfo:@{NSLocalizedDescriptionKey:@"-1;;Settings page is already active\r\n"}];
+            return -1;
+        }
+        zxPresentScriptSettings(bundlePath, YES, ^(BOOL saved) {
+            if (saved) {
+                NSError *startError = nil;
+                zxStartScript(bundlePath, repeatTime, playSpeed, sleepBetweenRun, &startError);
+                if (startError) showAlertBox(@"Error", startError.localizedDescription, 999);
+            }
+        });
+        return 0;
+    }
+    return zxStartScript(bundlePath, repeatTime, playSpeed, sleepBetweenRun, error);
+}
+
+static int zxStartScript(NSString *path, int repeatTime, float playSpeed, float interval, NSError **error) {
     if (playSpeed <= 0) playSpeed = 1.0f;
     currentRunSpeed = playSpeed;
 
-    [scriptPlayer setPath:[NSString stringWithFormat:@"%s", path]];
+    [scriptPlayer setPath:path];
     [scriptPlayer setRepeatTime:repeatTime];
     [scriptPlayer setSpeed:playSpeed];
-    [scriptPlayer setInterval:sleepBetweenRun];
+    [scriptPlayer setInterval:interval];
     [scriptPlayer setSwitchApp:switchAppBeforeRunScript];
 
     [scriptPlayer play:error];

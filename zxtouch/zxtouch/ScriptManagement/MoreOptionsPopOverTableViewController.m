@@ -10,6 +10,7 @@
 #import "Util.h"
 #import "PlaySettingsViewController.h"
 #import "PlaySettingsNavigationController.h"
+#import "Socket.h"
 
 @interface MoreOptionsPopOverTableViewController ()
 {
@@ -131,6 +132,22 @@
     
 }
 
+- (void)openScriptSettings:(id)sender {
+    Socket *socket = [[Socket alloc] init];
+    if ([socket connect:@"127.0.0.1" byPort:6000] != 0) {
+        [Util showAlertBoxWithOneOption:self title:@"错误" message:@"服务未连接。" buttonString:@"确定"];
+        return;
+    }
+    [socket send:[@"36" stringByAppendingString:currentFolder]];
+    NSString *reply = [socket recv:1024];
+    [socket close];
+    if (![reply hasPrefix:@"0"]) {
+        [Util showAlertBoxWithOneOption:self title:@"错误" message:reply.length ? reply : @"设置页未打开。" buttonString:@"确定"];
+    } else {
+        [self dismissViewControllerAnimated:YES completion:nil];
+    }
+}
+
 - (id)initWithFolderPath:(NSString *)path
 {
     self = [super initWithNibName:@"MoreOptionsPopOverTableViewController" bundle:nil];
@@ -161,7 +178,7 @@
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
     if ([[currentFolder pathExtension] isEqualToString:@"bdl"])
     {
-        return 2;
+        return [[NSFileManager defaultManager] fileExistsAtPath:[currentFolder stringByAppendingPathComponent:@"index.html"]] ? 3 : 2;
     }
     else
     {
@@ -200,6 +217,10 @@
               forControlEvents:UIControlEventTouchUpInside];
     }
     
+    if (indexPath.row == 2) {
+        [cell setButtonText:@"脚本设置"];
+        [cell.button addTarget:self action:@selector(openScriptSettings:) forControlEvents:UIControlEventTouchUpInside];
+    }
     return cell;
 }
 
