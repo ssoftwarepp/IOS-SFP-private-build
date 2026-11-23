@@ -173,20 +173,30 @@ NSData *zxMaskedTemplateMatches(NSDictionary *request, NSError **error) {
                     NSDictionary *hit = @{ @"index": @(index), @"x": @(x), @"y": @(y),
                                            @"width": @(tw), @"height": @(th), @"scale": @(factor),
                                            @"score": @(MAX(0, 1 - sqrt(squared / (3 * active)) / 255.0)) };
-                    BOOL suppressed = NO;
-                    for (NSDictionary *prior in matches) if ([prior[@"index"] isEqual:hit[@"index"]] && zxOverlap(prior, hit)) {
-                        suppressed = YES; break;
+                    BOOL dominated = NO;
+                    for (NSDictionary *prior in matches) {
+                        if ([prior[@"index"] isEqual:hit[@"index"]] && zxOverlap(prior, hit) &&
+                            [prior[@"score"] doubleValue] >= [hit[@"score"] doubleValue]) {
+                            dominated = YES;
+                            break;
+                        }
                     }
-                    if (!suppressed) [matches addObject:hit];
-                    if (matches.count >= (NSUInteger)limit) break;
+                    if (dominated) continue;
+                    for (NSInteger i = (NSInteger)matches.count - 1; i >= 0; i--) {
+                        NSDictionary *prior = matches[(NSUInteger)i];
+                        if ([prior[@"index"] isEqual:hit[@"index"]] && zxOverlap(prior, hit))
+                            [matches removeObjectAtIndex:(NSUInteger)i];
+                    }
+                    NSUInteger insert = 0;
+                    while (insert < matches.count && [matches[insert][@"score"] doubleValue] >= [hit[@"score"] doubleValue]) insert++;
+                    if (insert >= (NSUInteger)limit) continue;
+                    [matches insertObject:hit atIndex:insert];
+                    if (matches.count > (NSUInteger)limit) [matches removeLastObject];
                 }
-                if (matches.count >= (NSUInteger)limit) break;
             }
             free(mask);
             free(pattern);
-            if (matches.count >= (NSUInteger)limit) break;
         }
-        if (matches.count >= (NSUInteger)limit) break;
         index++;
     }
     free(screen);
