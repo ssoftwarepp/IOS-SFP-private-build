@@ -56,8 +56,10 @@ class KillProcessTests(unittest.TestCase):
         source = (ROOT / "pccontrol" / "Task.xm").read_text(encoding="utf-8")
         task = source.split("else if (taskType == TASK_KILL_PROCESS)", 1)[1].split(
             "else if (taskType == TASK_UPDATE_CACHE)", 1)[0]
-        self.assertIn("proc_listpids(PROC_ALL_PIDS", task)
-        self.assertIn("proc_pidpath(pid, executable", task)
+        self.assertIn('dlsym(libproc, "proc_listpids")', task)
+        self.assertIn('dlsym(libproc, "proc_pidpath")', task)
+        self.assertIn("listPIDs(1, 0", task)
+        self.assertIn("pidPath(pid, executable", task)
         self.assertIn("[path.lastPathComponent isEqualToString:name]", task)
         self.assertIn("kill(pid, SIGTERM)", task)
         self.assertIn("pid == getpid()", task)

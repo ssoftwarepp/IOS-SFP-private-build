@@ -14,7 +14,7 @@
 #include "DeviceInfo.h"
 #include "TouchIndicator/TouchIndicatorWindow.h"
 #import <mach/mach.h>
-#import <libproc.h>
+#import <dlfcn.h>
 #import <signal.h>
 #import <errno.h>
 #include <Foundation/NSDistributedNotificationCenter.h>
@@ -517,13 +517,22 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
                 notifyClient((UInt8 *)"-1;;Invalid process name\r\n", writeStreamRef);
                 return;
             }
-            int bytes = proc_listpids(PROC_ALL_PIDS, 0, NULL, 0);
+            void *libproc = dlopen("/usr/lib/libproc.dylib", RTLD_LAZY);
+            typedef int (*ZXListPIDs)(uint32_t, uint32_t, void *, int);
+            typedef int (*ZXPIDPath)(int, void *, uint32_t);
+            ZXListPIDs listPIDs = libproc ? (ZXListPIDs)dlsym(libproc, "proc_listpids") : NULL;
+            ZXPIDPath pidPath = libproc ? (ZXPIDPath)dlsym(libproc, "proc_pidpath") : NULL;
+            if (!listPIDs || !pidPath) {
+                notifyClient((UInt8 *)"-1;;Process enumeration unavailable\r\n", writeStreamRef);
+                return;
+            }
+            int bytes = listPIDs(1, 0, NULL, 0);
             if (bytes <= 0) {
                 notifyClient((UInt8 *)"-1;;Unable to list processes\r\n", writeStreamRef);
                 return;
             }
             NSMutableData *buffer = [NSMutableData dataWithLength:(NSUInteger)bytes + 1024 * sizeof(pid_t)];
-            int used = proc_listpids(PROC_ALL_PIDS, 0, buffer.mutableBytes, (int)buffer.length);
+            int used = listPIDs(1, 0, buffer.mutableBytes, (int)buffer.length);
             if (used < 0) {
                 notifyClient((UInt8 *)"-1;;Unable to list processes\r\n", writeStreamRef);
                 return;
@@ -534,8 +543,8 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
             for (int i = 0; i < used / (int)sizeof(pid_t); ++i) {
                 pid_t pid = pids[i];
                 if (pid <= 1 || pid == getpid()) continue;
-                char executable[PROC_PIDPATHINFO_MAXSIZE] = {0};
-                if (proc_pidpath(pid, executable, sizeof(executable)) <= 0) continue;
+                char executable[4096] = {0};
+                if (pidPath(pid, executable, sizeof(executable)) <= 0) continue;
                 NSString *path = [NSString stringWithUTF8String:executable];
                 if (![path.lastPathComponent isEqualToString:name]) continue;
                 if (kill(pid, SIGTERM) == 0) ++killed;
