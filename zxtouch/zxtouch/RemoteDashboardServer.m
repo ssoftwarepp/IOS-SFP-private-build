@@ -22,6 +22,7 @@
 #import "Socket.h"
 #endif
 #import "GCDWebServer.h"
+#import "RuntimeLogs.h"
 #import "GCDWebServerDataRequest.h"
 #import "GCDWebServerDataResponse.h"
 #import "GCDWebServerFileResponse.h"
@@ -315,7 +316,7 @@ static NSString *ZXDashboardIPAddress(void)
 
 - (NSString *)recentLogs
 {
-    NSString *logs = [NSString stringWithContentsOfFile:RUNTIME_OUTPUT_PATH encoding:NSUTF8StringEncoding error:nil] ?: @"";
+    NSString *logs = ZXReadRuntimeLogs(ZXDashboardMaximumLogLength);
     if (logs.length <= ZXDashboardMaximumLogLength) return logs;
     return [@"[仅显示最新日志。]\n" stringByAppendingString:[logs substringFromIndex:logs.length - ZXDashboardMaximumLogLength]];
 }
@@ -369,8 +370,7 @@ static NSString *ZXDashboardIPAddress(void)
         ZXRemoteDashboardServer *strongSelf = weakSelf;
         if (!strongSelf || ![strongSelf requestIsAuthorized:request]) return [strongSelf unauthorizedResponse];
         NSError *error = nil;
-        [@"" writeToFile:RUNTIME_OUTPUT_PATH atomically:YES encoding:NSUTF8StringEncoding error:&error];
-        if (error) return [strongSelf jsonResponse:@{ @"ok": @NO, @"error": error.localizedDescription ?: @"清空日志失败。" } status:500];
+        if (!ZXClearRuntimeLogs(&error)) return [strongSelf jsonResponse:@{ @"ok": @NO, @"error": error.localizedDescription ?: @"清空日志失败。" } status:500];
         strongSelf.lastAction = @"清空日志";
         return [strongSelf jsonResponse:@{ @"ok": @YES } status:200];
     }];

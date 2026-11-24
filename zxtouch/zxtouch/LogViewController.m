@@ -7,6 +7,7 @@
 
 #import "LogViewController.h"
 #include "Config.h"
+#import "RuntimeLogs.h"
 
 @interface LogViewController ()
 
@@ -32,32 +33,7 @@
 
 - (void)refrshTextView
 {
-    if (![[NSFileManager defaultManager] fileExistsAtPath:RUNTIME_OUTPUT_PATH])
-    {
-        if (![lastContent isEqualToString:@""]) {
-            _textView.text = @"";
-            lastContent = @"";
-        }
-        return;
-    }
-    
-    NSError *err = nil;
-    NSString* content = [NSString stringWithContentsOfFile:RUNTIME_OUTPUT_PATH
-                                                  encoding:NSUTF8StringEncoding
-                                                     error:&err];
-    if (err)
-    {
-        NSLog(@"Error while reading log file. Error: %@", err);
-        UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"错误"
-                                       message:[NSString stringWithFormat:@"读取日志失败。错误信息：%@", err]
-                                       preferredStyle:UIAlertControllerStyleAlert];
-         
-        UIAlertAction* defaultAction = [UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault
-           handler:^(UIAlertAction * action) {}];
-         
-        [alert addAction:defaultAction];
-        [self presentViewController:alert animated:YES completion:nil];
-    }
+    NSString *content = ZXReadRuntimeLogs(262144);
     if (![content isEqualToString:lastContent])
     {
         _textView.text = content;
@@ -79,16 +55,8 @@
 */
 
 - (IBAction)clearButtonClick:(id)sender {
-    if (![[NSFileManager defaultManager] fileExistsAtPath:RUNTIME_OUTPUT_PATH])
-    {
-        return;
-    }
-    
     NSError *err = nil;
-
-    [[NSFileManager defaultManager] removeItemAtPath:RUNTIME_OUTPUT_PATH error:&err];
-    
-    if (err)
+    if (!ZXClearRuntimeLogs(&err))
     {
         NSLog(@"Error while clearing log. Error: %@", err);
         UIAlertController* alert = [UIAlertController alertControllerWithTitle:@"错误"

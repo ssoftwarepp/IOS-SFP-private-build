@@ -62,6 +62,13 @@ class DashboardToolsTests(unittest.TestCase):
         for control in ('searchX', 'searchY', 'searchWidth', 'searchHeight', 'searchClear', 'visionModeSearch'):
             self.assertIn('id="{}"'.format(control), html)
         self.assertIn('region: imageSearchRegion()', html)
+        for control in ('searchCoordinates', 'searchCopy', 'searchExport'):
+            self.assertIn('id="{}"'.format(control), html)
+        self.assertIn('return `${x},${y},${x + w - 1},${y + h - 1}`;', html)
+        self.assertIn("'ios-sfp-search-region.txt'", html)
+        self.assertIn("elements.searchCopy.addEventListener('click', copySearchCoordinates)", html)
+        self.assertIn("elements.searchExport.addEventListener('click', exportSearchCoordinates)", html)
+        self.assertIn("if (visionMode === 'search') updateSearchCoordinates();", html)
         self.assertIn('id="matchFrame"', html)
         self.assertIn('await matchParameters({ name: uploaded.name })', html)
         self.assertIn('payload.snapshot = snapshotName', html)

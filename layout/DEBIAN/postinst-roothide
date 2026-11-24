@@ -21,12 +21,7 @@ mkdir -p /var/mobile/Library/ZXTouch/scripts/examples/
 mkdir -p /var/mobile/Library/ZXTouch/config/tweak/
 mkdir -p /var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/
 
-# Copy bundled example scripts. These are maintained by the package, so refresh
-# them on upgrade while leaving unrelated user scripts alone.
-EXAMPLES=$(jbroot /usr/share/zxtouch/examples)
-if [ -d "$EXAMPLES" ]; then
-    cp -Rf "$EXAMPLES/"* /var/mobile/Library/ZXTouch/scripts/examples/ 2>/dev/null || true
-fi
+# Existing user scripts are left untouched; new installs start with an empty library.
 
 REGISTRY=/var/mobile/Library/ZXTouch/config/tweak/script_registry.plist
 REGISTRY_SOURCE=$(jbroot /usr/share/zxtouch/script-registry.plist)
@@ -34,27 +29,15 @@ if [ -f "$REGISTRY_SOURCE" ]; then
     cp -f "$REGISTRY_SOURCE" "$REGISTRY"
 fi
 
-# Patch add_datetime.sh shebang — roothide has no fixed /var/jb path
+# Install the same daily writer as rootless with a roothide-compatible shebang.
 SH=$(jbroot /bin/sh)
 SCRIPT=/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/add_datetime.sh
-cat > "$SCRIPT" << 'EOF'
-#!/bin/sh
-OUTPUT=/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output
-DATE=$(jbroot /usr/bin/date 2>/dev/null)
-if [ ! -x "$DATE" ]; then DATE=/usr/bin/date; fi
-if [ ! -x "$DATE" ]; then DATE=/bin/date; fi
-echo "$($DATE '+%m-%d-%Y %T'): Start running script. Script path: $1" >> "$OUTPUT"
-while IFS= read -r line; do
-    echo "$($DATE '+%m-%d-%Y %T'): $line" >> "$OUTPUT"
-done
-EOF
-if [ -f "$SCRIPT" ]; then
-    printf '#!%s\n' "$SH" > /tmp/adt_new.sh
-    tail -n +2 "$SCRIPT" >> /tmp/adt_new.sh
-    mv /tmp/adt_new.sh "$SCRIPT"
-    chmod +x "$SCRIPT"
+SOURCE=$(jbroot /usr/share/zxtouch/add_datetime.sh)
+if [ -f "$SOURCE" ]; then
+    printf '#!%s\n' "$SH" > "$SCRIPT"
+    tail -n +2 "$SOURCE" >> "$SCRIPT"
+    chmod 755 "$SCRIPT"
 fi
-touch /var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output
 chown -R mobile:mobile /var/mobile/Library/ZXTouch
 
 # roothide has two views of /var/mobile: the real filesystem, and the one seen

@@ -7,6 +7,7 @@
 #include "AlertBox.h"
 #include "Config.h"
 #include "Common.h"
+#import "../zxtouch/zxtouch/RuntimeLogs.h"
 #import <sys/stat.h>
 #include <errno.h>
 #include <unistd.h>
@@ -462,17 +463,20 @@ static NSString *ZXPythonModulePath(void)
         isPlaying = false;
         return;
     }
-    // Ensure output log file exists so the >> redirect doesn't fail
-    NSString *outputLog = @"/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output";
-    if (![[NSFileManager defaultManager] fileExistsAtPath:outputLog])
-        [@"" writeToFile:outputLog atomically:YES encoding:NSUTF8StringEncoding error:nil];
-
+    [[NSFileManager defaultManager] createDirectoryAtPath:ZXRuntimeLogDirectory()
+                              withIntermediateDirectories:YES attributes:nil error:nil];
     NSString *dateWrapper = @"/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/add_datetime.sh";
     NSString *shellPath = ZXShellPath();
     if (![[NSFileManager defaultManager] fileExistsAtPath:dateWrapper]) {
-        NSString *wrapper = [NSString stringWithFormat:@"#!%@\nOUTPUT=/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output\nDATE=/var/jb/usr/bin/date\nif [ ! -x \"$DATE\" ]; then DATE=/usr/bin/date; fi\nif [ ! -x \"$DATE\" ]; then DATE=/bin/date; fi\necho \"$($DATE '+%%m-%%d-%%Y %%T'): Start running script. Script path: $1\" >> \"$OUTPUT\"\nwhile IFS= read -r line; do\n    echo \"$($DATE '+%%m-%%d-%%Y %%T'): $line\" >> \"$OUTPUT\"\ndone\n", shellPath];
-        [wrapper writeToFile:dateWrapper atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        chmod(dateWrapper.UTF8String, 0755);
+        NSString *bundled = [jbroot(@"/usr/share/zxtouch/add_datetime.sh") copy];
+        NSString *source = [NSString stringWithContentsOfFile:bundled encoding:NSUTF8StringEncoding error:nil];
+        NSRange firstLine = [source rangeOfString:@"\n"];
+        if (firstLine.location != NSNotFound) {
+            NSString *wrapper = [NSString stringWithFormat:@"#!%@\n%@", shellPath,
+                                 [source substringFromIndex:NSMaxRange(firstLine)]];
+            [wrapper writeToFile:dateWrapper atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            chmod(dateWrapper.UTF8String, 0755);
+        }
     }
 
     NSString *scriptDir = [filePath stringByDeletingLastPathComponent];
@@ -501,7 +505,7 @@ static NSString *ZXPythonModulePath(void)
     if (!stoppedByUser && pythonExitCode != 0) {
         NSString *title = @"Script Error";
         NSString *message;
-        NSString *logTail = [NSString stringWithContentsOfFile:outputLog encoding:NSUTF8StringEncoding error:nil] ?: @"";
+        NSString *logTail = ZXReadRuntimeLogs(262144);
         BOOL dyldLibpythonMissing = [logTail rangeOfString:@"Library not loaded" options:0].location != NSNotFound &&
                                     [logTail rangeOfString:@"libpython" options:0].location != NSNotFound;
         if (statusText == nil && shellExitCode < 0) {

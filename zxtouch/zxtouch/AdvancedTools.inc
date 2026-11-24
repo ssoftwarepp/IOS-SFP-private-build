@@ -26,17 +26,28 @@
         unsigned long long length = [[[NSFileManager defaultManager] attributesOfItemAtPath:upload.temporaryPath error:nil] fileSize];
         if (!length || length > ZXDashboardMaximumAssetSize)
             return [owner jsonResponse:@{ @"ok": @NO, @"error": @"模板需小于 25 MB" } status:413];
+        NSString *destinationType = [[request firstArgumentForControlName:@"destination"] string];
         NSString *directory = @"/var/mobile/Library/ZXTouch/templates";
+        if (destinationType.length && ![destinationType isEqualToString:@"template"] &&
+            ![destinationType isEqualToString:@"script"])
+            return [owner jsonResponse:@{ @"ok": @NO, @"error": @"保存位置无效" } status:400];
+        if ([destinationType isEqualToString:@"script"]) {
+            NSString *script = [[request firstArgumentForControlName:@"script"] string];
+            directory = [owner bundlePathForRelativePath:script];
+            if (!directory) return [owner jsonResponse:@{ @"ok": @NO, @"error": @"脚本包不存在" } status:400];
+        }
         NSFileManager *files = [NSFileManager defaultManager];
         NSError *failure = nil;
         if (![files createDirectoryAtPath:directory withIntermediateDirectories:YES attributes:nil error:&failure])
             return [owner jsonResponse:@{ @"ok": @NO, @"error": failure.localizedDescription ?: @"创建模板库失败" } status:500];
         NSString *destination = [directory stringByAppendingPathComponent:name];
+        if (destinationType.length && [files fileExistsAtPath:destination])
+            return [owner jsonResponse:@{ @"ok": @NO, @"error": @"文件已存在，请更换文件名" } status:409];
         NSData *content = [NSData dataWithContentsOfFile:upload.temporaryPath];
         if (![content writeToFile:destination options:NSDataWritingAtomic error:&failure])
             return [owner jsonResponse:@{ @"ok": @NO, @"error": failure.localizedDescription ?: @"上传模板失败" } status:500];
         owner.lastAction = @"上传模板";
-        return [owner jsonResponse:@{ @"ok": @YES, @"name": name } status:200];
+        return [owner jsonResponse:@{ @"ok": @YES, @"name": name, @"path": destination } status:200];
     }];
 
     [self.server addHandlerForMethod:@"POST" path:@"/api/image/matches" requestClass:[GCDWebServerDataRequest class] processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request) {

@@ -21,12 +21,7 @@ mkdir -p /var/mobile/Library/ZXTouch/config/tweak/
 mkdir -p /var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/
 mkdir -p /var/jb/usr/bin /var/jb/bin
 
-# Copy bundled example scripts. These are maintained by the package, so refresh
-# them on upgrade while leaving unrelated user scripts alone.
-EXAMPLES=/var/jb/usr/share/zxtouch/examples
-if [ -d "$EXAMPLES" ]; then
-    cp -Rf "$EXAMPLES/"* /var/mobile/Library/ZXTouch/scripts/examples/ 2>/dev/null || true
-fi
+# Existing user scripts are left untouched; new installs start with an empty library.
 
 REGISTRY=/var/mobile/Library/ZXTouch/config/tweak/script_registry.plist
 if [ -f /var/jb/usr/share/zxtouch/script-registry.plist ]; then
@@ -34,19 +29,10 @@ if [ -f /var/jb/usr/share/zxtouch/script-registry.plist ]; then
 fi
 
 ADD_DATETIME=/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/add_datetime.sh
-cat > "$ADD_DATETIME" << 'EOF'
-#!/var/jb/bin/sh
-OUTPUT=/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output
-DATE=/var/jb/usr/bin/date
-if [ ! -x "$DATE" ]; then DATE=/usr/bin/date; fi
-if [ ! -x "$DATE" ]; then DATE=/bin/date; fi
-echo "$($DATE '+%m-%d-%Y %T'): Start running script. Script path: $1" >> "$OUTPUT"
-while IFS= read -r line; do
-    echo "$($DATE '+%m-%d-%Y %T'): $line" >> "$OUTPUT"
-done
-EOF
-chmod 755 "$ADD_DATETIME"
-touch /var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output
+if [ -f /var/jb/usr/share/zxtouch/add_datetime.sh ]; then
+    cp -f /var/jb/usr/share/zxtouch/add_datetime.sh "$ADD_DATETIME"
+    chmod 755 "$ADD_DATETIME"
+fi
 
 chown -R mobile:mobile /var/mobile/Library/ZXTouch
 

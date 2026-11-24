@@ -1,6 +1,7 @@
 #include "Common.h"
 #include "Config.h"
 #include "Runner.h"
+#import "../zxtouch/zxtouch/RuntimeLogs.h"
 #import <sys/utsname.h>
 #import <sys/wait.h>
 #include <dlfcn.h>
@@ -41,31 +42,34 @@ Boolean zxPathLooksExecutable(const char *path)
 // runs, and the user is left with an empty log and nothing to report.
 void zxAppendRuntimeLog(NSString *text)
 {
-    NSString *logPath = @"/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output";
-    NSFileManager *fm = [NSFileManager defaultManager];
+    @synchronized ([NSFileManager class]) {
+        ZXPruneRuntimeLogs();
+        NSString *logPath = ZXRuntimeLogPaths().lastObject;
+        NSFileManager *fm = [NSFileManager defaultManager];
 
-    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-    formatter.dateFormat = @"MM-dd-yyyy HH:mm:ss";
-    NSString *stamped = [NSString stringWithFormat:@"%@: %@\n", [formatter stringFromDate:[NSDate date]], text];
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        formatter.dateFormat = @"MM-dd-yyyy HH:mm:ss";
+        NSString *stamped = [NSString stringWithFormat:@"%@: %@\n", [formatter stringFromDate:[NSDate date]], text];
 
-    if (![fm fileExistsAtPath:logPath]) {
-        [fm createDirectoryAtPath:[logPath stringByDeletingLastPathComponent]
-      withIntermediateDirectories:YES attributes:nil error:nil];
-        [stamped writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-        return;
-    }
+        if (![fm fileExistsAtPath:logPath]) {
+            [fm createDirectoryAtPath:[logPath stringByDeletingLastPathComponent]
+              withIntermediateDirectories:YES attributes:nil error:nil];
+            [stamped writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            return;
+        }
 
-    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
-    if (!handle) return;
-    @try {
-        [handle seekToEndOfFile];
-        [handle writeData:[stamped dataUsingEncoding:NSUTF8StringEncoding]];
-    }
-    @catch (NSException *exception) {
-        NSLog(@"com.zjx.springboard: could not append to runtime log: %@", exception.reason);
-    }
-    @finally {
-        [handle closeFile];
+        NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+        if (!handle) return;
+        @try {
+            [handle seekToEndOfFile];
+            [handle writeData:[stamped dataUsingEncoding:NSUTF8StringEncoding]];
+        }
+        @catch (NSException *exception) {
+            NSLog(@"com.zjx.springboard: could not append to runtime log: %@", exception.reason);
+        }
+        @finally {
+            [handle closeFile];
+        }
     }
 }
 
@@ -342,6 +346,9 @@ pid_t system2Cancelable(const char *command, int *infp, int *outfp,
         return result;
     }
 
+    NSString *dailyLog = ZXRuntimeLogPaths().lastObject;
+    char logPathForChild[PATH_MAX];
+    snprintf(logPathForChild, sizeof(logPathForChild), "%s", dailyLog.fileSystemRepresentation);
     int p_stdin[2] = {-1, -1};
     int p_stdout[2] = {-1, -1};
     if (processGroup) *processGroup = 0;
@@ -528,8 +535,7 @@ pid_t system2Cancelable(const char *command, int *infp, int *outfp,
                 // append to the log file directly. open and write are
                 // async-signal-safe, unlike anything in Foundation.
                 int execErrno = errno;
-                int logFd = open("/var/mobile/Library/ZXTouch/coreutils/ScriptRuntime/output",
-                                 O_WRONLY | O_APPEND | O_CREAT, 0644);
+                int logFd = open(logPathForChild, O_WRONLY | O_APPEND | O_CREAT, 0644);
                 if (logFd >= 0) {
                     const char *prefix = "ZXTouch: execve failed: ";
                     write(logFd, prefix, strlen(prefix));
