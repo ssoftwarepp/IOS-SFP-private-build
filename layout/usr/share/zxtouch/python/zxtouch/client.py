@@ -632,6 +632,8 @@ class zxtouch:
         fields = self._recv_line()[:-2].split(b";;")
         if not fields or fields[0] != b"0":
             detail = fields[1].decode("utf-8", errors="replace") if len(fields) > 1 else "unknown error"
+            if detail.startswith("ZXTouchAX: 3: AX application pid=") and " returned no child elements" in detail:
+                return {"count": 0, "root": {"role": "AXApplication", "children": []}}
             raise RuntimeError("ZXTouch AX hierarchy failed: {}".format(detail))
         if len(fields) != 3 or fields[1] != b"application/json":
             raise RuntimeError("Malformed ZXTouch AX hierarchy response header")

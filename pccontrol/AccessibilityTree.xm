@@ -434,6 +434,12 @@ NSData *zxCopyAccessibilityTree(NSError **error)
     const useconds_t delays[] = {150000, 450000, 900000};
     for (NSUInteger attempt = 0; attempt < 4; ++attempt) {
         void (^capture)(void) = ^{
+            readForegroundPID();
+            failure = nil;
+            if (!zxIsLivePID(pid)) {
+                failure = @"AX foreground PID unavailable";
+                return;
+            }
             if (associate) {
                 associate(getpid(), pid, 1);
                 associate(pid, getpid(), 1);

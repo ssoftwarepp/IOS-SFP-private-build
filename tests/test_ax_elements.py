@@ -275,13 +275,30 @@ class AXProtocolTests(unittest.TestCase):
             self.assertEqual(device.find_elements(text="missing", timeout=3), [])
             get_ui.assert_called_once_with(timeout=3)
 
-    def test_hierarchy_error_preserves_native_error_code(self):
+    def test_hierarchy_empty_children_returns_empty_tree(self):
         source = (Path(__file__).resolve().parent.parent / "pccontrol" /
                   "Task.xm").read_text(encoding="utf-8")
         self.assertIn("error.domain, (long)error.code, error.localizedDescription", source)
-        device = make_device([b"-1;;ZXTouchAX: 3: AX application returned no child elements\r\n"])
-        with self.assertRaisesRegex(RuntimeError, "ZXTouchAX: 3: AX application returned no child elements"):
-            device.get_element_tree()
+        device = make_device([b"-1;;ZXTouchAX: 3: AX application pid=12887 returned no child elements (3015=-25215/0)\r\n"])
+        tree = device.get_element_tree()
+        self.assertEqual(tree["count"], 0)
+        self.assertEqual(tree["root"]["children"], [])
+        self.assertEqual(device.find_tree_elements(label="missing", tree=tree), [])
+
+    def test_hierarchy_other_errors_still_raise(self):
+        for message in (b"ZXTouchAX: 2: AX application element unavailable",
+                        b"ZXTouchAX: 3: AX candidates empty",
+                        b"ZXTouchAX: 1: AX runtime unavailable"):
+            with self.subTest(message=message):
+                device = make_device([b"-1;;" + message + b"\r\n"])
+                with self.assertRaisesRegex(RuntimeError, "ZXTouch AX hierarchy failed"):
+                    device.get_element_tree()
+
+    def test_hierarchy_refreshes_foreground_pid_per_attempt(self):
+        source = (Path(__file__).resolve().parent.parent / "pccontrol" /
+                  "AccessibilityTree.xm").read_text(encoding="utf-8")
+        loop = source.split("for (NSUInteger attempt = 0; attempt < 4; ++attempt) {", 1)[1]
+        self.assertLess(loop.index("readForegroundPID();"), loop.index("CFTypeRef application = create(pid);"))
 
     def test_hierarchy_rejects_missing_root(self):
         device = make_device([framed_response({"count": 0})])
