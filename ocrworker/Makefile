@@ -6,7 +6,7 @@ include $(THEOS)/makefiles/common.mk
 TOOL_NAME = zxtouch-ocr-worker
 PADDLE_DEPS ?= $(CURDIR)/../third_party/paddleocr/runtime/ios
 zxtouch-ocr-worker_FILES = main.mm PaddleOCR.mm ../third_party/paddleocr/clipper/clipper.cpp
-zxtouch-ocr-worker_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error=nontrivial-memcall -I$(PADDLE_DEPS)/include -I$(PADDLE_DEPS)/opencv/include/opencv4
+zxtouch-ocr-worker_CFLAGS = -fobjc-arc -Wno-deprecated-declarations -Wno-error=nontrivial-memaccess -I$(PADDLE_DEPS)/include -I$(PADDLE_DEPS)/opencv/include/opencv4
 zxtouch-ocr-worker_CCFLAGS = -std=c++17 -fexceptions -fcxx-exceptions
 zxtouch-ocr-worker_FRAMEWORKS = Foundation CoreGraphics ImageIO
 zxtouch-ocr-worker_LIBRARIES = z
