@@ -23,6 +23,15 @@ typedef NS_ENUM(NSInteger, ZXOCRTransferStatus) {
     ZXOCRTransferOK, ZXOCRTransferTimeout, ZXOCRTransferClosed, ZXOCRTransferIOError
 };
 
+static void ZXOCRLogTransferIO(int fd, BOOL writing, int pollResult, int pollErrno,
+                               int selectResult, int selectErrno, ssize_t sendResult, int sendErrno) {
+    NSString *detail = [NSString stringWithFormat:
+        @"IOS-SFP OCR: transfer fd=%d writing=%d poll=%d poll_errno=%d select=%d select_errno=%d send=%zd send_errno=%d (-2=not-called)",
+        fd, writing, pollResult, pollErrno, selectResult, selectErrno, sendResult, sendErrno];
+    NSLog(@"%@", detail);
+    zxAppendRuntimeLog(detail);
+}
+
 static ZXOCRTransferStatus ZXOCRTransfer(int fd, void *buffer, size_t length, BOOL writing,
                                            CFAbsoluteTime deadline, int *failureErrno) {
     uint8_t *cursor = buffer;
@@ -31,22 +40,40 @@ static ZXOCRTransferStatus ZXOCRTransfer(int fd, void *buffer, size_t length, BO
         if (remaining <= 0) return ZXOCRTransferTimeout;
         struct pollfd ready = {fd, writing ? POLLOUT : POLLIN, 0};
         int interval = (int)MIN(remaining * 1000, 1000);
-        int result = poll(&ready, 1, interval);
-        if (result < 0 && errno == EPERM && fd < FD_SETSIZE) {
+        int pollResult = poll(&ready, 1, interval);
+        int pollErrno = pollResult < 0 ? errno : 0;
+        int selectResult = -2, selectErrno = 0;
+        int result = pollResult;
+        if (pollResult < 0 && pollErrno == EPERM && fd < FD_SETSIZE) {
             fd_set descriptors; FD_ZERO(&descriptors); FD_SET(fd, &descriptors);
             struct timeval wait = {interval / 1000, (interval % 1000) * 1000};
-            result = select(fd + 1, writing ? NULL : &descriptors,
-                            writing ? &descriptors : NULL, NULL, &wait);
+            selectResult = select(fd + 1, writing ? NULL : &descriptors,
+                                  writing ? &descriptors : NULL, NULL, &wait);
+            selectErrno = selectResult < 0 ? errno : 0;
+            result = selectResult;
             if (result > 0) ready.revents = writing ? POLLOUT : POLLIN;
         }
-        if (result < 0 && errno == EINTR) continue;
-        if (result < 0) { *failureErrno = errno; return ZXOCRTransferIOError; }
+        if (result < 0 && (selectResult == -2 ? pollErrno : selectErrno) == EINTR) continue;
+        if (result < 0) {
+            *failureErrno = selectResult == -2 ? pollErrno : selectErrno;
+            ZXOCRLogTransferIO(fd, writing, pollResult, pollErrno, selectResult, selectErrno, -2, 0);
+            return ZXOCRTransferIOError;
+        }
         if (!result) continue;
-        if (ready.revents & POLLNVAL) { *failureErrno = EBADF; return ZXOCRTransferIOError; }
-        if (ready.revents & POLLERR) { *failureErrno = EIO; return ZXOCRTransferIOError; }
+        if (ready.revents & (POLLNVAL | POLLERR)) {
+            *failureErrno = (ready.revents & POLLNVAL) ? EBADF : EIO;
+            ZXOCRLogTransferIO(fd, writing, pollResult, pollErrno, selectResult, selectErrno, -2, 0);
+            return ZXOCRTransferIOError;
+        }
         ssize_t count = writing ? send(fd, cursor, length, MSG_DONTWAIT) : recv(fd, cursor, length, MSG_DONTWAIT);
-        if (count < 0 && (errno == EINTR || errno == EAGAIN)) continue;
-        if (count < 0) { *failureErrno = errno; return ZXOCRTransferIOError; }
+        int transferErrno = count < 0 ? errno : 0;
+        if (count < 0 && (transferErrno == EINTR || transferErrno == EAGAIN)) continue;
+        if (count < 0) {
+            *failureErrno = transferErrno;
+            ZXOCRLogTransferIO(fd, writing, pollResult, pollErrno, selectResult, selectErrno,
+                               writing ? count : -2, writing ? transferErrno : 0);
+            return ZXOCRTransferIOError;
+        }
         if (!count) return ZXOCRTransferClosed;
         cursor += count;
         length -= (size_t)count;
