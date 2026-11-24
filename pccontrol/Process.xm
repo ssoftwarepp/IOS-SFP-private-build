@@ -74,7 +74,7 @@ static NSArray<NSNumber *> *zxPIDsForExecutable(NSString *target, NSError **erro
         return nil;
     }
     NSMutableArray *matches = [NSMutableArray array];
-    pid_t *pids = buffer.mutableBytes;
+    pid_t *pids = (pid_t *)buffer.mutableBytes;
     for (int i = 0; i < used / (int)sizeof(pid_t); ++i) {
         pid_t pid = pids[i];
         if (pid <= 1 || pid == getpid()) continue;
