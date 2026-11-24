@@ -40,6 +40,20 @@ static void zxReplyJSON(id object, CFWriteStreamRef stream) {
         notifyClientData((const UInt8 *)body.bytes, (CFIndex)body.length, stream);
 }
 
+static BOOL zxAccessPasteboard(void (^operation)(void)) {
+    if ([NSProcessInfo processInfo].operatingSystemVersion.majorVersion >= 16) {
+        static dispatch_queue_t queue;
+        static dispatch_once_t once;
+        dispatch_once(&once, ^{ queue = dispatch_queue_create("com.zjx.zxtouch.pasteboard", DISPATCH_QUEUE_SERIAL); });
+        dispatch_semaphore_t finished = dispatch_semaphore_create(0);
+        dispatch_async(queue, ^{ operation(); dispatch_semaphore_signal(finished); });
+        return dispatch_semaphore_wait(finished, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0;
+    }
+    if ([NSThread isMainThread]) operation();
+    else dispatch_sync(dispatch_get_main_queue(), operation);
+    return YES;
+}
+
 static NSString *zxBundleIDFromRequest(UInt8 *data) {
     NSString *identifier = [NSString stringWithUTF8String:(const char *)data];
     if (!identifier.length || [identifier rangeOfString:@";;"].location != NSNotFound ||
@@ -572,9 +586,9 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
     {
         __block NSString *text = nil;
         void (^readClipboard)(void) = ^{ text = UIPasteboard.generalPasteboard.string ?: @""; };
-        if (NSThread.isMainThread) readClipboard();
-        else dispatch_sync(dispatch_get_main_queue(), readClipboard);
-        zxReplyJSON(@{@"text": text}, writeStreamRef);
+        if (!zxAccessPasteboard(readClipboard))
+            notifyClient((UInt8 *)"-1;;Clipboard read timed out\r\n", writeStreamRef);
+        else zxReplyJSON(@{@"text": text}, writeStreamRef);
     }
     else if (taskType == TASK_SET_CLIPBOARD_TEXT)
     {
@@ -586,9 +600,9 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
             return;
         }
         void (^writeClipboard)(void) = ^{ UIPasteboard.generalPasteboard.string = text; };
-        if (NSThread.isMainThread) writeClipboard();
-        else dispatch_sync(dispatch_get_main_queue(), writeClipboard);
-        notifyClient((UInt8 *)"0\r\n", writeStreamRef);
+        if (!zxAccessPasteboard(writeClipboard))
+            notifyClient((UInt8 *)"-1;;Clipboard write timed out\r\n", writeStreamRef);
+        else notifyClient((UInt8 *)"0\r\n", writeStreamRef);
     }
     else if (taskType == TASK_CLEAR_APP_DATA)
     {

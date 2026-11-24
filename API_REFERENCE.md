@@ -1,6 +1,6 @@
 # IOS-SFP 接口参考
 
-适用源码：本仓库当前 HTTP、Socket、Python 实现。本文按实际代码说明参数，不把浏览器调试页面当作脚本运行的前置条件。**覆盖范围**：项目公开的 24 个控制台 HTTP 路由、TCP 6000 的主要任务、`zxtouch.client.zxtouch` 的 39 个不以下划线开头的实例方法，以及 `automation`/`batch_scan` 对外辅助函数。这里的“39 个”包含 `disconnect`，不含构造器 `__init__` 与协议私有方法；不是 Python 标准库、iOS 系统 API 或项目所有 Objective-C 内部函数的全集。HTTP 路由源自 [`RemoteDashboardServer.m`](zxtouch/zxtouch/RemoteDashboardServer.m)、[`DashboardTools.inc`](zxtouch/zxtouch/DashboardTools.inc) 和 [`AdvancedTools.inc`](zxtouch/zxtouch/AdvancedTools.inc)；手机端 Python 源自 [`client.py`](layout/usr/share/zxtouch/python/zxtouch/client.py)、[`automation.py`](layout/usr/share/zxtouch/python/zxtouch/automation.py) 和 [`batch_scan.py`](layout/usr/share/zxtouch/python/zxtouch/batch_scan.py)。
+适用源码：本仓库当前 HTTP、Socket、Python 实现。本文按实际代码说明参数，不把浏览器调试页面当作脚本运行的前置条件。**覆盖范围**：项目公开的 24 个控制台 HTTP 路由、TCP 6000 的主要任务、`zxtouch.client.zxtouch` 的 42 个不以下划线开头的实例方法，以及 `automation`/`batch_scan` 对外辅助函数。这里的“42 个”包含 `disconnect`，不含构造器 `__init__` 与协议私有方法；不是 Python 标准库、iOS 系统 API 或项目所有 Objective-C 内部函数的全集。HTTP 路由源自 [`RemoteDashboardServer.m`](zxtouch/zxtouch/RemoteDashboardServer.m)、[`DashboardTools.inc`](zxtouch/zxtouch/DashboardTools.inc) 和 [`AdvancedTools.inc`](zxtouch/zxtouch/AdvancedTools.inc)；手机端 Python 源自 [`client.py`](layout/usr/share/zxtouch/python/zxtouch/client.py)、[`automation.py`](layout/usr/share/zxtouch/python/zxtouch/automation.py) 和 [`batch_scan.py`](layout/usr/share/zxtouch/python/zxtouch/batch_scan.py)。
 
 ## 1. 入口、认证与坐标
 
@@ -141,7 +141,12 @@ curl -X POST "http://$DEVICE_IP:8080/api/ocr?token=$PAIR_TOKEN" -H 'Content-Type
 | 32 AX 树 | 无 | `0;;application/json;;N\r\n` + `N` 字节 `{pid,count,candidateCount,limitReached,root}`。 |
 | 33 原生多图 | 一个参数：UTF-8 JSON 的 Base64 文本，键 `templates` 为 1..12 个设备端 PNG **绝对路径**；其余键 `masks`、`screenshot`（设备端 PNG 绝对路径）、`region`、`threshold`、`maxResults`、`minScale`、`maxScale`、`steps` 同 HTTP 多图参数；`masks` 与模板等长且允许 `null` | `0;;application/json;;N\r\n` + `N` 字节 JSON `{matches,count,width,height}`。 |
 | 34 AX 坐标命中 | 一个参数：Base64(UTF-8 JSON `{"x":逻辑点,"y":逻辑点}`) | `0;;application/json;;N\r\n` + `N` 字节 JSON `{pid,x,y,element}`。 |
-| 35 结束进程 | 一个参数：进程可执行文件名的 UTF-8 字符串（不得含 `;;` 和控制字符）；例如 `35Preferences\r\n` | `0;;N\r\n`，`N` 为成功发送 SIGTERM 的进程数；失败 `-1;;原因\r\n`。 |
+| 35 结束进程 | 一个参数：应用 Bundle ID（不得含 `;;` 和控制字符）；例如 `35com.apple.Preferences\r\n` | `0;;N\r\n`，`N=1` 为确认退出、`N=0` 为已安装但未运行；失败 `-1;;原因\r\n`。 |
+| 42 已安装应用 | 无 | `0;;application/json;;N\r\n` + JSON `{apps:[{bundleId,name,type}]}`，包含系统与用户安装应用。 |
+| 43 读取剪切板 | 无 | 定长 JSON `{text:字符串}`，支持空文本和换行。 |
+| 44 清除应用数据 | Bundle ID | 定长 JSON `{bundleId,removedEntries}`；失败 `-1;;原因\r\n`。 |
+| 45 前台进程名 | 无 | 定长 JSON `{name:可执行文件名}`；SpringBoard 返回 `SpringBoard`。 |
+| 46 设置剪切板 | Base64 编码的 UTF-8 文本 | `0\r\n`；失败 `-1;;原因\r\n`。 |
 | 27/1 Vision OCR | 第一个参数 `1`，然后 `region`、`custom_words`、`minimum_height`、`recognition_level`、`languages`、`auto_correct`、`debug_image_path` | 普通文本响应 `0;;text,,x,,y,,width,,height;;...\r\n`。 |
 | 27/2 OCR 语言 | 第一个参数 `2`，然后 `recognition_level` | 普通文本响应，可用语言字符串列表。 |
 
@@ -172,7 +177,10 @@ phone.disconnect()
 | `touch(type,finger_index,x,y)` | **发送一次触点动作**，按下、移动或抬起；它不是一次完整的点击。`type` 必填触摸事件类型：`1` 按下、`2` 移动、`0` 抬起；`finger_index` 必填触点序号，常用 `1`；`x,y` 必填截图物理像素坐标，发送时乘 10 编码。发送后立即返回 `None`，不读响应。 |
 | `touch_with_list(touch_list)` | **一次发送多个触点动作**，可组合点击或轨迹。`touch_list` 必填列表，每项包含 `type`、`finger_index`、`x`、`y`，意义同 `touch`；同一次指令发送多事件并返回 `None`，不读响应。原实现用整数格式化每项的 `x*10,y*10`，传入整数像素最直接。 |
 | `switch_to_app(bundle_identifier)` | **请求启动指定 App 并切换到前台**；已运行时切到前台。`bundle_identifier` 必填应用 bundle ID 字符串（如 `com.apple.Preferences`）。返回普通 `(bool,list[str]|str)`；目前任务 11 对启动函数的返回码不作检查，因此 `(True,[])` 只代表设备接受了指令，不能证明 App 已进入前台；用 `get_foreground_app()` 或 `/api/status` 的 `foregroundApp` 再确认。 |
-| `kill_process(name)` | **结束手机上的指定可执行文件名进程**。`name` 必填精确 basename，不是 bundle ID；例如 `Preferences`。向所有匹配进程发送 SIGTERM，返回 `(True,成功发信号的进程数量:int)`；未找到 `(True,0)`；枚举/发信号失败 `(False,错误字符串)`，非法名称抛 `ValueError`。 |
+| `kill_process(bundle_id)` | **按安装应用的 Bundle ID 结束进程**。例如 `com.apple.Preferences`；通过 FrontBoard 按 Bundle ID 请求退出，并核对 SpringBoard 的运行状态；确认退出返回 `(True,1)`，本来未运行返回 `(True,0)`；失败 `(False,错误字符串)`，非法标识抛 `ValueError`。 |
+| `get_installed_apps()` | **列出系统与用户安装应用**；返回 `{apps:[{bundleId,name,type}]}`，通过 `bundleId` 操作应用。失败抛 `RuntimeError`。 |
+| `clear_app_data(bundle_id)` | **结束应用并清除其数据容器内容**（保留容器登记元数据），返回 `{bundleId,removedEntries}`；失败抛 `RuntimeError`，非法标识抛 `ValueError`。不清除 App Group 数据。 |
+| `get_foreground_process_name()` | **读取前台应用的可执行文件名**；返回字符串；SpringBoard 前台返回 `SpringBoard`，失败抛 `RuntimeError`。应用操作仍使用 Bundle ID。 |
 | `show_alert_box(title,content,duration)` | **在手机界面弹出系统提示框**。`title` 标题、`content` 文案（均字符串）、`duration` 显示时长（秒）；返回普通 tuple。 |
 | `run_shell_command(command)` | **在手机端调用 `/bin/sh -c` 执行命令**。`command` 必填 Shell 命令字符串。返回普通 tuple；任务 13 目前始终回 `0`，不透出命令 stdout、stderr 或退出码，所以 `(True,[])` 不等于 Shell 命令成功。源：`Task.xm:110-115`。 |
 | `prompt_input(title="ZXTouch",message="",placeholder="",default_value="")` | **弹出带文本框的系统对话框并读取用户输入**。`title` 输入框标题；`message` 提示文本；`placeholder` 占位文本；`default_value` 初始文本。成功 `(True,输入文字)`，失败 `(False,错误字符串)`。 |
@@ -184,13 +192,13 @@ phone.disconnect()
 
 ### 5.2 运行 App、结束 App、网络请求
 
-这三项需要区分 **ZXTouch 自带方法**、**Python 标准库** 与 **HTTP 控制台**：`switch_to_app()` 是项目自带的启动/切前台入口；源码已有按可执行文件名结束进程的 `kill_process(name)`，没有按 bundle ID 结束 App 的 `kill_app()` / `terminate_app()`，也没有 `http_get()` / `http_post()` 之类专用网络方法，也没有通用的设备端网络请求 Socket 任务。`POST /api/run` 运行的是 `.bdl` 脚本，不是 App；`POST /api/stop` 停止的是脚本，不是 App；控制台提供的 HTTP 路由是接收请求的服务端接口，不是供脚本向任意网址发请求的客户端接口。
+这三项需要区分 **ZXTouch 自带方法**、**Python 标准库** 与 **HTTP 控制台**：`switch_to_app()` 是项目自带的启动/切前台入口；源码已有按 Bundle ID 结束进程的 `kill_process(bundle_id)`，以及 `get_installed_apps()`、`clear_app_data(bundle_id)`，也没有 `http_get()` / `http_post()` 之类专用网络方法，也没有通用的设备端网络请求 Socket 任务。`POST /api/run` 运行的是 `.bdl` 脚本，不是 App；`POST /api/stop` 停止的是脚本，不是 App；控制台提供的 HTTP 路由是接收请求的服务端接口，不是供脚本向任意网址发请求的客户端接口。
 
 **读取前台 App**：`get_foreground_app()` 不接收参数；返回 `(True,bundle_id)` 或 `(False,错误字符串)`。设备端查询前台应用并提取 bundle ID；查询不到应用 ID 时回退到 `com.apple.springboard`。不依赖 HTTP 控制台或配对令牌，直接通过 TCP 6000 运行状态子任务读取。源码：`client.py:394-403`、`DeviceInfo.xm:63-72`。
 
 **启动或切换 App**：`switch_to_app(bundle_identifier)` 将应用包标识传给 SpringBoardServices `SBSLaunchApplicationWithIdentifier`。已有进程会被调到前台；未运行时由系统尝试启动。设备任务当前忽略系统函数的返回码，统一写入 `0` 回包，因此 Python 的 `(True,[])` 仅表示任务已被处理，不能作为应用实际在前台的证明；随后调用 `get_foreground_app()` 对比 bundle ID。源码：`client.py:115-126`、`Process.xm:7-21`、`Task.xm:56-61`。
 
-**结束指定进程**：`kill_process(name)` 通过 TCP 6000 任务 35 在手机端枚举所有进程，按**可执行文件 basename 完全相等**匹配 `name`，对匹配的每个进程发送 `SIGTERM`；不会按 bundle ID 匹配，也不会模糊匹配。`name` 为必填非空字符串，不含控制字符或协议分隔符 `;;`；非法输入抛 `ValueError`。成功返回 `(True, 发出信号的进程数:int)`，未匹配返回 `(True,0)`，枚举或发信号失败返回 `(False,错误字符串)`。`SIGTERM` 表示请求进程退出，不等待退出完成。任务跳过 PID 0/1 和自身。源码：`client.py` 的 `kill_process()`、`Task.xm` 的 `TASK_KILL_PROCESS`。`run_shell_command()` 仍不提供 Shell 命令退出码。
+**按 Bundle ID 管理应用**：已安装列表、终止、剪切板线程行为与 `ios-mcp` 对照；`ios-mcp` 只提供数据容器路径查询，没有清数据接口，本项目清数据前必须确认退出。`get_installed_apps()` 枚举系统和用户安装应用，返回应用的 `bundleId`、`name`、`type`。`kill_process(bundle_id)` 通过任务 35 向 `FBSSystemService` 发出 Bundle ID 终止请求，核对 `SBApplication.isRunning` 由真变假后返回 `(True,1)`；本来未运行返回 `(True,0)`，超时、运行态不可读、标识不存在或终止请求失败均返回 `(False,错误字符串)`。`clear_app_data(bundle_id)` 通过任务 44 定位应用数据容器，先终止并等待进程退出，再删除容器内应用文件，保留容器目录和登记元数据；不清理 App Group 容器。`get_foreground_process_name()` 取前台应用可执行文件名；实际指定应用操作仍使用 Bundle ID。`run_shell_command()` 仍不提供 Shell 命令退出码。
 
 ```python
 from zxtouch.client import zxtouch
@@ -200,13 +208,13 @@ try:
     launch_reply = phone.switch_to_app("com.apple.Preferences")
     print("launch command reply:", launch_reply)
     print("foreground app:", phone.get_foreground_app())
-    success, signaled = phone.kill_process("Preferences")
-    print("signal delivered:", success, signaled)
+    success, exited = phone.kill_process("com.apple.Preferences")
+    print("app exited:", success, exited)
 finally:
     phone.disconnect()
 ```
 
-这里 `"com.apple.Preferences"` 是启动所需的 **bundle ID**，`"Preferences"` 是进程的可执行文件名，二者不是同一字段。手机本地和远程 Python 客户端均通过同一个 TCP 任务操作手机进程。
+这里启动和结束应用都使用 `"com.apple.Preferences"` 这一 **Bundle ID**；前台进程名 `Preferences` 只用于展示。手机本地和远程 Python 客户端均通过 TCP 任务操作手机进程。
 
 **网络请求**：手机端 Python 脚本可直接使用 Python 标准库 `urllib.request`。`url` 是目标 HTTP(S) 地址；`data` 是请求体原始 bytes，缺省为 GET，设置后下例显式用 POST；`Content-Type` 指明 JSON；`timeout` 是网络超时秒数；响应的 `status` 是 HTTP 状态码、`read()` 返回原始响应 bytes。该 API 与 ZXTouch TCP 6000 无关：
 
@@ -250,8 +258,8 @@ with urlopen(request, timeout=10) as response:
 | --- | --- |
 | `show_toast(toast_type,content,duration,position=0,fontSize=0)` | **在手机屏幕上显示短暂悬浮文字提示**。`toast_type` 必填 toast 样式编号，`toasttypes.py` 定义 0 隐藏、1 错误、2 警告、3 消息、4 成功；`content` 必填文字；`duration` 必填显示时长；`position` 默认为 0 顶部，1 底部、2 左侧、3 右侧；`fontSize` 默认为 0，使用默认字号。返回普通 tuple。 |
 | `show_keyboard()` / `hide_keyboard()` / `paste_from_clipboard()` | **分别弹出软键盘、收起软键盘、将剪贴板文本粘贴到当前输入位置**；均无参数；返回普通 tuple。 |
-| `get_text_from_clipboard()` | **读取手机系统剪贴板的文本**；无参数；成功 `(True,字符串)`，失败 `(False,错误字符串)`。 |
-| `set_clipboard_text(text)` | **将文本写入手机系统剪贴板**。`text` 必填写入的字符串；返回普通 tuple。 |
+| `get_text_from_clipboard()` | **读取手机系统剪贴板的文本**；无参数；成功 `(True,字符串)`，失败 `(False,错误字符串)`。定长 JSON 回包保留空文本、换行与 `;;`。 |
+| `set_clipboard_text(text)` | **将文本写入手机系统剪贴板**。`text` 必须是字符串（允许空字符串），UTF-8 Base64 编码发送；返回普通 tuple。 |
 | `insert_text(text)` | **向当前聚焦的输入框逐字插入文本**；字符 `\b` 会发送删除一个字符。`text` 必填字符串。代码逐字符读取并忽略每次指令的失败回包，最终总是返回 `(True,"")`，所以不能以该返回值确认实际输入完成。源：`client.py:329-345`。 |
 | `move_cursor(offset)` | **移动当前文本输入光标**。`offset` 必填相对光标字符位移，负数左移、正数右移；返回普通 tuple。 |
 | `get_screen_size()` | **查询设备截图宽、高**；无参数；成功 `(True,{"width":str,"height":str})`，数值字符串单位物理像素。 |

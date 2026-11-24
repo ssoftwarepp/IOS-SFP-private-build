@@ -32,18 +32,18 @@ def make_client(reply):
 
 
 class KillProcessTests(unittest.TestCase):
-    def test_bundle_id_returns_number_of_signaled_processes(self):
-        client = make_client(b"0;;2\r\n")
-        self.assertEqual(client.kill_process("com.apple.Preferences"), (True, 2))
+    def test_bundle_id_returns_number_of_confirmed_exits(self):
+        client = make_client(b"0;;1\r\n")
+        self.assertEqual(client.kill_process("com.apple.Preferences"), (True, 1))
         self.assertEqual(client.s.sent, [datahandler.format_socket_data(
             tasktypes.TASK_KILL_PROCESS, "com.apple.Preferences")])
 
-    def test_no_match_returns_zero(self):
-        self.assertEqual(make_client(b"0;;0\r\n").kill_process("missing"), (True, 0))
+    def test_installed_app_not_running_returns_zero(self):
+        self.assertEqual(make_client(b"0;;0\r\n").kill_process("com.apple.Preferences"), (True, 0))
 
-    def test_signal_error_returns_failure(self):
-        self.assertEqual(make_client(b"-1;;signal failed: 1\r\n").kill_process("Preferences"),
-                         (False, "signal failed: 1"))
+    def test_termination_error_returns_failure(self):
+        self.assertEqual(make_client(b"-1;;Application did not exit\r\n").kill_process("com.apple.Preferences"),
+                         (False, "Application did not exit"))
 
     def test_invalid_name_sends_nothing(self):
         client = make_client(b"")
@@ -52,16 +52,16 @@ class KillProcessTests(unittest.TestCase):
                 client.kill_process(name)
         self.assertEqual(client.s.sent, [])
 
-    def test_native_task_matches_bundle_executable_path_and_uses_sigterm(self):
+    def test_native_terminates_by_bundle_id_and_confirms_exit(self):
         task = (ROOT / "pccontrol" / "Task.xm").read_text(encoding="utf-8")
         source = (ROOT / "pccontrol" / "Process.xm").read_text(encoding="utf-8")
         self.assertIn("zxTerminateApplication(bundleID, &error)", task)
-        self.assertIn('dlsym(library, "proc_listpids")', source)
-        self.assertIn('dlsym(library, "proc_pidpath")', source)
         self.assertIn("zxApplicationProxy(bundleID)", source)
-        self.assertIn("[actual isEqualToString:target]", source)
-        self.assertIn("kill(pid, SIGTERM)", source)
-        self.assertIn("pid == getpid()", source)
+        self.assertIn("terminateApplication:forReason:andReport:withDescription:", source)
+        self.assertIn("zxSpringBoardApplication(bundleID)", source)
+        self.assertIn("if (!state.boolValue) return 1", source)
+        self.assertNotIn('proc_pidpath', source)
+        self.assertNotIn('kill(pid, SIGTERM)', source)
 
 
 if __name__ == "__main__":

@@ -1,13 +1,18 @@
 #include "Process.h"
 #include "Common.h"
 #import <UIKit/UIKit.h>
-#import <signal.h>
-#import <errno.h>
+#import <objc/runtime.h>
 #import <unistd.h>
 
 @interface NSObject (ZXApplicationLookup)
 + (id)defaultWorkspace;
 + (id)applicationProxyForIdentifier:(NSString *)identifier;
++ (id)sharedInstance;
++ (id)sharedService;
+- (id)applicationWithBundleIdentifier:(NSString *)identifier;
+- (NSArray *)runningApplications;
+- (NSArray *)allApplications;
+- (BOOL)isRunning;
 - (NSArray *)allInstalledApplications;
 - (NSString *)applicationIdentifier;
 - (NSString *)localizedName;
@@ -28,8 +33,20 @@ static NSError *zxProcessError(NSString *message) {
 static id zxApplicationProxy(NSString *bundleID) {
     if (![bundleID isKindOfClass:NSString.class] || bundleID.length == 0) return nil;
     Class proxyClass = NSClassFromString(@"LSApplicationProxy");
-    return [proxyClass respondsToSelector:@selector(applicationProxyForIdentifier:)] ?
+    id proxy = [proxyClass respondsToSelector:@selector(applicationProxyForIdentifier:)] ?
         [proxyClass applicationProxyForIdentifier:bundleID] : nil;
+    if (proxy && [proxy respondsToSelector:@selector(applicationIdentifier)] &&
+        [[proxy applicationIdentifier] isEqualToString:bundleID]) return proxy;
+    Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
+    id workspace = [workspaceClass respondsToSelector:@selector(defaultWorkspace)] ?
+        [workspaceClass defaultWorkspace] : nil;
+    NSArray *installed = [workspace respondsToSelector:@selector(allInstalledApplications)] ?
+        [workspace allInstalledApplications] : nil;
+    for (id candidate in installed) {
+        if ([candidate respondsToSelector:@selector(applicationIdentifier)] &&
+            [[candidate applicationIdentifier] isEqualToString:bundleID]) return candidate;
+    }
+    return nil;
 }
 
 static NSString *zxExecutablePath(id proxy) {
@@ -40,59 +57,75 @@ static NSString *zxExecutablePath(id proxy) {
         [bundle URLByAppendingPathComponent:@"Info.plist"]][@"CFBundleExecutable"];
     if (![executable isKindOfClass:NSString.class] || !executable.length ||
         ![executable.lastPathComponent isEqualToString:executable]) return nil;
-    return [[bundle.path stringByAppendingPathComponent:executable] stringByResolvingSymlinksInPath];
+    return [bundle.path stringByAppendingPathComponent:executable];
 }
 
-typedef int (*ZXListPIDs)(uint32_t, uint32_t, void *, int);
-typedef int (*ZXPIDPath)(int, void *, uint32_t);
-
-static BOOL zxProcessFunctions(ZXListPIDs *list, ZXPIDPath *path) {
-    static void *library;
-    static dispatch_once_t once;
-    dispatch_once(&once, ^{ library = dlopen("/usr/lib/libproc.dylib", RTLD_LAZY); });
-    *list = library ? (ZXListPIDs)dlsym(library, "proc_listpids") : NULL;
-    *path = library ? (ZXPIDPath)dlsym(library, "proc_pidpath") : NULL;
-    return *list && *path;
+static id zxSpringBoardApplication(NSString *bundleID) {
+    Class controllerClass = objc_getClass("SBApplicationController");
+    id controller = [controllerClass respondsToSelector:@selector(sharedInstance)] ?
+        [controllerClass sharedInstance] : nil;
+    return [controller respondsToSelector:@selector(applicationWithBundleIdentifier:)] ?
+        [controller applicationWithBundleIdentifier:bundleID] : nil;
 }
 
-static NSArray<NSNumber *> *zxPIDsForExecutable(NSString *target, NSError **error) {
-    ZXListPIDs list = NULL;
-    ZXPIDPath path = NULL;
-    if (!zxProcessFunctions(&list, &path)) {
-        if (error) *error = zxProcessError(@"Process enumeration unavailable");
-        return nil;
-    }
-    int bytes = list(1, 0, NULL, 0);
-    if (bytes <= 0) {
-        if (error) *error = zxProcessError(@"Unable to list processes");
-        return nil;
-    }
-    NSMutableData *buffer = [NSMutableData dataWithLength:(NSUInteger)bytes + 1024 * sizeof(pid_t)];
-    int used = list(1, 0, buffer.mutableBytes, (int)buffer.length);
-    if (used <= 0) {
-        if (error) *error = zxProcessError(@"Unable to list processes");
-        return nil;
-    }
-    NSMutableArray *matches = [NSMutableArray array];
-    pid_t *pids = (pid_t *)buffer.mutableBytes;
-    for (int i = 0; i < used / (int)sizeof(pid_t); ++i) {
-        pid_t pid = pids[i];
-        if (pid <= 1 || pid == getpid()) continue;
-        char raw[4096] = {0};
-        if (path(pid, raw, sizeof(raw)) <= 0) continue;
-        NSString *actual = [[NSString stringWithUTF8String:raw] stringByResolvingSymlinksInPath];
-        if ([actual isEqualToString:target]) [matches addObject:@(pid)];
-    }
-    return matches;
+static NSNumber *zxRunningState(NSString *bundleID) {
+    __block NSNumber *running = nil;
+    void (^readState)(void) = ^{
+        id app = zxSpringBoardApplication(bundleID);
+        if (app && [app respondsToSelector:@selector(isRunning)])
+            running = @([app isRunning]);
+    };
+    if ([NSThread isMainThread]) readState();
+    else dispatch_sync(dispatch_get_main_queue(), readState);
+    return running;
+}
+
+static BOOL zxRequestTermination(NSString *bundleID, NSError **error) {
+    __block BOOL requested = NO;
+    __block NSString *failure = nil;
+    void (^terminate)(void) = ^{
+        @try {
+            Class serviceClass = objc_getClass("FBSSystemService");
+            id service = [serviceClass respondsToSelector:@selector(sharedService)] ?
+                [serviceClass sharedService] : nil;
+            SEL selector = @selector(terminateApplication:forReason:andReport:withDescription:);
+            NSMethodSignature *signature = [service methodSignatureForSelector:selector];
+            if (!signature || signature.numberOfArguments != 6) {
+                failure = @"FrontBoard termination service unavailable";
+                return;
+            }
+            NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+            invocation.target = service;
+            invocation.selector = selector;
+            NSString *identifier = bundleID;
+            int reason = 1;
+            BOOL report = NO;
+            NSString *description = @"Terminated via ZXTouch";
+            [invocation setArgument:&identifier atIndex:2];
+            [invocation setArgument:&reason atIndex:3];
+            [invocation setArgument:&report atIndex:4];
+            [invocation setArgument:&description atIndex:5];
+            [invocation invoke];
+            requested = YES;
+        } @catch (NSException *exception) {
+            failure = exception.reason ?: @"FrontBoard termination failed";
+        }
+    };
+    if ([NSThread isMainThread]) terminate();
+    else dispatch_sync(dispatch_get_main_queue(), terminate);
+    if (!requested && error) *error = zxProcessError(failure ?: @"FrontBoard termination failed");
+    return requested;
 }
 
 NSArray *zxInstalledApplications(void) {
+    __block NSArray *result = nil;
+    void (^collect)(void) = ^{
     Class workspaceClass = NSClassFromString(@"LSApplicationWorkspace");
     id workspace = [workspaceClass respondsToSelector:@selector(defaultWorkspace)] ?
         [workspaceClass defaultWorkspace] : nil;
     NSArray *proxies = [workspace respondsToSelector:@selector(allInstalledApplications)] ?
         [workspace allInstalledApplications] : nil;
-    if (![proxies isKindOfClass:NSArray.class]) return nil;
+    if (![proxies isKindOfClass:NSArray.class]) return;
     NSMutableArray *apps = [NSMutableArray array];
     NSMutableSet *seen = [NSMutableSet set];
     for (id proxy in proxies) {
@@ -102,39 +135,47 @@ NSArray *zxInstalledApplications(void) {
         [seen addObject:identifier];
         NSString *name = [proxy respondsToSelector:@selector(localizedName)] ? [proxy localizedName] : nil;
         NSString *type = [proxy respondsToSelector:@selector(applicationType)] ? [proxy applicationType] : nil;
-        [apps addObject:@{@"bundleId": identifier, @"name": name ?: @"", @"type": type ?: @""}];
+        if (![name isKindOfClass:NSString.class]) name = @"";
+        if (![type isKindOfClass:NSString.class]) type = @"";
+        NSURL *bundle = [proxy respondsToSelector:@selector(bundleURL)] ? [proxy bundleURL] : nil;
+        if ([type isEqualToString:@"User"] || [bundle.path containsString:@"/Containers/Bundle/Application/"] ||
+            ![identifier hasPrefix:@"com.apple."]) type = @"User";
+        else if ([type isEqualToString:@"Internal"] || !type.length) type = @"System";
+        [apps addObject:@{@"bundleId": identifier, @"name": name, @"type": type}];
     }
     [apps sortUsingComparator:^NSComparisonResult(NSDictionary *a, NSDictionary *b) {
         return [a[@"bundleId"] compare:b[@"bundleId"]];
     }];
-    return apps;
+    result = [apps copy];
+    };
+    if ([NSThread isMainThread]) collect();
+    else dispatch_sync(dispatch_get_main_queue(), collect);
+    return result;
 }
 
 NSInteger zxTerminateApplication(NSString *bundleID, NSError **error) {
-    id proxy = zxApplicationProxy(bundleID);
-    NSString *target = zxExecutablePath(proxy);
-    if (!target.length) {
-        if (error) *error = zxProcessError(@"Bundle ID is not an installed application or has no executable");
+    if (!zxApplicationProxy(bundleID)) {
+        if (error) *error = zxProcessError(@"Bundle ID is not an installed application");
         return -1;
     }
-    NSArray<NSNumber *> *matches = zxPIDsForExecutable(target, error);
-    if (!matches) return -1;
-    ZXPIDPath pidPath = NULL;
-    ZXListPIDs list = NULL;
-    zxProcessFunctions(&list, &pidPath);
-    NSInteger terminated = 0;
-    for (NSNumber *entry in matches) {
-        pid_t pid = entry.intValue;
-        char raw[4096] = {0};
-        if (pidPath(pid, raw, sizeof(raw)) <= 0 ||
-            ![[[NSString stringWithUTF8String:raw] stringByResolvingSymlinksInPath] isEqualToString:target]) continue;
-        if (kill(pid, SIGTERM) == 0) ++terminated;
-        else if (errno != ESRCH) {
-            if (error) *error = zxProcessError([NSString stringWithFormat:@"SIGTERM failed: %d", errno]);
+    NSNumber *state = zxRunningState(bundleID);
+    if (!state) {
+        if (error) *error = zxProcessError(@"Application running state unavailable");
+        return -1;
+    }
+    if (!state.boolValue) return 0;
+    if (!zxRequestTermination(bundleID, error)) return -1;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+        usleep(100000);
+        state = zxRunningState(bundleID);
+        if (!state) {
+            if (error) *error = zxProcessError(@"Application running state unavailable");
             return -1;
         }
+        if (!state.boolValue) return 1;
     }
-    return terminated;
+    if (error) *error = zxProcessError(@"Application did not exit after termination request");
+    return -1;
 }
 
 NSDictionary *zxClearApplicationData(NSString *bundleID, NSError **error) {
@@ -168,16 +209,10 @@ NSDictionary *zxClearApplicationData(NSString *bundleID, NSError **error) {
     }
     NSInteger count = zxTerminateApplication(bundleID, error);
     if (count < 0) return nil;
-    NSString *executable = zxExecutablePath(proxy);
-    for (int attempt = 0; attempt < 40; ++attempt) {
-        NSArray *running = zxPIDsForExecutable(executable, error);
-        if (!running) return nil;
-        if (!running.count) break;
-        if (attempt == 39) {
-            if (error) *error = zxProcessError(@"Application did not exit");
-            return nil;
-        }
-        usleep(100000);
+    NSNumber *state = zxRunningState(bundleID);
+    if (!state || state.boolValue) {
+        if (error) *error = zxProcessError(@"Application still running; data not cleared");
+        return nil;
     }
     NSArray *contents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:path error:error];
     if (!contents) return nil;
@@ -193,13 +228,10 @@ NSDictionary *zxClearApplicationData(NSString *bundleID, NSError **error) {
 NSString *zxForegroundProcessName(void) {
     id app = getFrontMostApplication();
     NSString *identifier = [app respondsToSelector:@selector(bundleIdentifier)] ? [app bundleIdentifier] : nil;
-    if (!identifier.length || [identifier isEqualToString:@"com.apple.springboard"]) return @"SpringBoard";
-    id proxy = zxApplicationProxy(identifier);
-    NSString *path = zxExecutablePath(proxy);
-    if (!path.length) return nil;
-    NSError *error = nil;
-    NSArray *running = zxPIDsForExecutable(path, &error);
-    return running.count ? path.lastPathComponent : nil;
+    if ([identifier isEqualToString:@"com.apple.springboard"]) return @"SpringBoard";
+    if (!identifier.length) return nil;
+    NSString *path = zxExecutablePath(zxApplicationProxy(identifier));
+    return path.lastPathComponent.length ? path.lastPathComponent : nil;
 }
 
 int (*openApp)(CFStringRef, Boolean);

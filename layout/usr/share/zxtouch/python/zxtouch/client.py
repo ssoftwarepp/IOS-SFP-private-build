@@ -164,7 +164,7 @@ class zxtouch:
         return bundle_id
 
     def kill_process(self, bundle_id):
-        """Send SIGTERM to running processes belonging to an installed Bundle ID."""
+        """Terminate an installed Bundle ID; return (True, 1) once stopped, (True, 0) if idle."""
         self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_KILL_PROCESS, self._require_bundle_id(bundle_id)))
         success, result = self._recv_response()
         if not success:
@@ -176,7 +176,7 @@ class zxtouch:
         return self._json_request(tasktypes.TASK_LIST_INSTALLED_APPS)
 
     def clear_app_data(self, bundle_id):
-        """Terminate an installed app and clear its Documents, Library and tmp contents."""
+        """Terminate an installed app, verify its exit, then clear its data container."""
         return self._json_request(tasktypes.TASK_CLEAR_APP_DATA, self._require_bundle_id(bundle_id))
 
     def get_foreground_process_name(self):

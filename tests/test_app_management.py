@@ -85,6 +85,10 @@ class AppManagementTests(unittest.TestCase):
         self.assertIn('allInstalledApplications', native)
         self.assertIn('dataContainerURL', native)
         self.assertIn('zxTerminateApplication(bundleID, error)', native)
+        self.assertIn('NSNumber *state = zxRunningState(bundleID);', native)
+        self.assertIn('if (!state || state.boolValue)', native)
+        self.assertLess(native.index('if (!state || state.boolValue)'),
+                        native.index('contentsOfDirectoryAtPath:path error:error'))
         self.assertIn('contentsOfDirectoryAtPath:path error:error', native)
         self.assertIn('hasPrefix:@".com.apple.mobile_container_manager."', native)
         self.assertIn('zxForegroundProcessName()', task)
