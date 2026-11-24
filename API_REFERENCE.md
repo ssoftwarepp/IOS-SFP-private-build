@@ -141,7 +141,7 @@ curl -X POST "http://$DEVICE_IP:8080/api/ocr?token=$PAIR_TOKEN" -H 'Content-Type
 | 32 AX 树 | 无 | `0;;application/json;;N\r\n` + `N` 字节 `{pid,count,candidateCount,limitReached,root}`。 |
 | 33 原生多图 | 一个参数：UTF-8 JSON 的 Base64 文本，键 `templates` 为 1..12 个设备端 PNG **绝对路径**；其余键 `masks`、`screenshot`（设备端 PNG 绝对路径）、`region`、`threshold`、`maxResults`、`minScale`、`maxScale`、`steps` 同 HTTP 多图参数；`masks` 与模板等长且允许 `null` | `0;;application/json;;N\r\n` + `N` 字节 JSON `{matches,count,width,height}`。 |
 | 34 AX 坐标命中 | 一个参数：Base64(UTF-8 JSON `{"x":逻辑点,"y":逻辑点}`) | `0;;application/json;;N\r\n` + `N` 字节 JSON `{pid,x,y,element}`。 |
-| 35 结束进程 | 一个参数：应用 Bundle ID（不得含 `;;` 和控制字符）；例如 `35com.apple.Preferences\r\n` | `0;;N\r\n`，`N=1` 为确认退出、`N=0` 为已安装但未运行；失败 `-1;;原因\r\n`。 |
+| 35 结束进程 | 一个参数：应用 Bundle ID（不得含 `;;` 和控制字符）；例如 `35com.apple.Preferences\r\n` | `0;;N\r\n`，`N=1` 为确认退出，或运行态不可读但终止请求已发出；`N=0` 为已安装且确认未运行；失败 `-1;;原因\r\n`。 |
 | 42 已安装应用 | 无 | `0;;application/json;;N\r\n` + JSON `{apps:[{bundleId,name,type}]}`，包含系统与用户安装应用。 |
 | 43 读取剪切板 | 无 | 定长 JSON `{text:字符串}`，支持空文本和换行。 |
 | 44 清除应用数据 | Bundle ID | 定长 JSON `{bundleId,removedEntries}`；失败 `-1;;原因\r\n`。 |
@@ -177,7 +177,7 @@ phone.disconnect()
 | `touch(type,finger_index,x,y)` | **发送一次触点动作**，按下、移动或抬起；它不是一次完整的点击。`type` 必填触摸事件类型：`1` 按下、`2` 移动、`0` 抬起；`finger_index` 必填触点序号，常用 `1`；`x,y` 必填截图物理像素坐标，发送时乘 10 编码。发送后立即返回 `None`，不读响应。 |
 | `touch_with_list(touch_list)` | **一次发送多个触点动作**，可组合点击或轨迹。`touch_list` 必填列表，每项包含 `type`、`finger_index`、`x`、`y`，意义同 `touch`；同一次指令发送多事件并返回 `None`，不读响应。原实现用整数格式化每项的 `x*10,y*10`，传入整数像素最直接。 |
 | `switch_to_app(bundle_identifier)` | **请求启动指定 App 并切换到前台**；已运行时切到前台。`bundle_identifier` 必填应用 bundle ID 字符串（如 `com.apple.Preferences`）。返回普通 `(bool,list[str]|str)`；目前任务 11 对启动函数的返回码不作检查，因此 `(True,[])` 只代表设备接受了指令，不能证明 App 已进入前台；用 `get_foreground_app()` 或 `/api/status` 的 `foregroundApp` 再确认。 |
-| `kill_process(bundle_id)` | **按安装应用的 Bundle ID 结束进程**。例如 `com.apple.Preferences`；通过 FrontBoard 按 Bundle ID 请求退出，并核对 SpringBoard 的运行状态；确认退出返回 `(True,1)`，本来未运行返回 `(True,0)`；失败 `(False,错误字符串)`，非法标识抛 `ValueError`。 |
+| `kill_process(bundle_id)` | **按安装应用的 Bundle ID 结束进程**。例如 `com.apple.Preferences`；通过 FrontBoard 按 Bundle ID 请求退出，并核对 SpringBoard 的运行状态；确认退出或运行态不可读但终止请求已发出返回 `(True,1)`，确认未运行返回 `(True,0)`；失败 `(False,错误字符串)`，非法标识抛 `ValueError`。 |
 | `get_installed_apps()` | **列出系统与用户安装应用**；返回 `{apps:[{bundleId,name,type}]}`，通过 `bundleId` 操作应用。失败抛 `RuntimeError`。 |
 | `clear_app_data(bundle_id)` | **结束应用并清除其数据容器内容**（保留容器登记元数据），返回 `{bundleId,removedEntries}`；失败抛 `RuntimeError`，非法标识抛 `ValueError`。不清除 App Group 数据。 |
 | `get_foreground_process_name()` | **读取前台应用的可执行文件名**；返回字符串；SpringBoard 前台返回 `SpringBoard`，失败抛 `RuntimeError`。应用操作仍使用 Bundle ID。 |
@@ -198,7 +198,7 @@ phone.disconnect()
 
 **启动或切换 App**：`switch_to_app(bundle_identifier)` 将应用包标识传给 SpringBoardServices `SBSLaunchApplicationWithIdentifier`。已有进程会被调到前台；未运行时由系统尝试启动。设备任务当前忽略系统函数的返回码，统一写入 `0` 回包，因此 Python 的 `(True,[])` 仅表示任务已被处理，不能作为应用实际在前台的证明；随后调用 `get_foreground_app()` 对比 bundle ID。源码：`client.py:115-126`、`Process.xm:7-21`、`Task.xm:56-61`。
 
-**按 Bundle ID 管理应用**：已安装列表、终止、剪切板线程行为与 `ios-mcp` 对照；`ios-mcp` 只提供数据容器路径查询，没有清数据接口，本项目清数据前必须确认退出。`get_installed_apps()` 枚举系统和用户安装应用，返回应用的 `bundleId`、`name`、`type`。`kill_process(bundle_id)` 通过任务 35 向 `FBSSystemService` 发出 Bundle ID 终止请求，核对 `SBApplication.isRunning` 由真变假后返回 `(True,1)`；本来未运行返回 `(True,0)`，超时、运行态不可读、标识不存在或终止请求失败均返回 `(False,错误字符串)`。`clear_app_data(bundle_id)` 通过任务 44 定位应用数据容器，先终止并等待进程退出，再删除容器内应用文件，保留容器目录和登记元数据；不清理 App Group 容器。`get_foreground_process_name()` 取前台应用可执行文件名；实际指定应用操作仍使用 Bundle ID。`run_shell_command()` 仍不提供 Shell 命令退出码。
+**按 Bundle ID 管理应用**：已安装列表、终止、剪切板线程行为与 `ios-mcp` 对照；`ios-mcp` 只提供数据容器路径查询，没有清数据接口，本项目清数据前必须确认退出。`get_installed_apps()` 枚举系统和用户安装应用，返回应用的 `bundleId`、`name`、`type`。`kill_process(bundle_id)` 通过任务 35 向 `FBSSystemService` 发出 Bundle ID 终止请求，优先通过 `SBApplicationController.runningApplications` 核对运行状态，回退 `allApplications` 与 `isRunning`；确认退出返回 `(True,1)`，状态不可读时仍发送请求并返回 `(True,1)`（仅表示请求已发出）。确认未运行返回 `(True,0)`，已知仍运行至超时、标识不存在或终止请求失败返回 `(False,错误字符串)`。`clear_app_data(bundle_id)` 通过任务 44 定位应用数据容器，先终止并等待进程退出，再删除容器内应用文件，保留容器目录和登记元数据；不清理 App Group 容器。`get_foreground_process_name()` 取前台应用可执行文件名；实际指定应用操作仍使用 Bundle ID。`run_shell_command()` 仍不提供 Shell 命令退出码。
 
 ```python
 from zxtouch.client import zxtouch

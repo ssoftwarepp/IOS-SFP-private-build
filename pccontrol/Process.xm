@@ -10,6 +10,7 @@
 + (id)sharedInstance;
 + (id)sharedService;
 - (id)applicationWithBundleIdentifier:(NSString *)identifier;
+- (NSString *)bundleIdentifier;
 - (NSArray *)runningApplications;
 - (NSArray *)allApplications;
 - (BOOL)isRunning;
@@ -60,20 +61,47 @@ static NSString *zxExecutablePath(id proxy) {
     return [bundle.path stringByAppendingPathComponent:executable];
 }
 
-static id zxSpringBoardApplication(NSString *bundleID) {
-    Class controllerClass = objc_getClass("SBApplicationController");
-    id controller = [controllerClass respondsToSelector:@selector(sharedInstance)] ?
-        [controllerClass sharedInstance] : nil;
-    return [controller respondsToSelector:@selector(applicationWithBundleIdentifier:)] ?
-        [controller applicationWithBundleIdentifier:bundleID] : nil;
+static NSString *zxSpringBoardBundleID(id app) {
+    if ([app respondsToSelector:@selector(bundleIdentifier)]) return [app bundleIdentifier];
+    if ([app respondsToSelector:@selector(applicationIdentifier)]) return [app applicationIdentifier];
+    return nil;
 }
 
 static NSNumber *zxRunningState(NSString *bundleID) {
     __block NSNumber *running = nil;
     void (^readState)(void) = ^{
-        id app = zxSpringBoardApplication(bundleID);
-        if (app && [app respondsToSelector:@selector(isRunning)])
-            running = @([app isRunning]);
+        Class controllerClass = objc_getClass("SBApplicationController");
+        id controller = [controllerClass respondsToSelector:@selector(sharedInstance)] ?
+            [controllerClass sharedInstance] : nil;
+        if ([controller respondsToSelector:@selector(runningApplications)]) {
+            NSArray *apps = [controller runningApplications];
+            if ([apps isKindOfClass:NSArray.class]) {
+                BOOL found = NO;
+                for (id app in apps) {
+                    if ([zxSpringBoardBundleID(app) isEqualToString:bundleID]) {
+                        found = YES;
+                        break;
+                    }
+                }
+                running = @(found);
+                return;
+            }
+        }
+        if ([controller respondsToSelector:@selector(allApplications)]) {
+            NSArray *apps = [controller allApplications];
+            if ([apps isKindOfClass:NSArray.class]) {
+                for (id app in apps) {
+                    if ([zxSpringBoardBundleID(app) isEqualToString:bundleID] &&
+                        [app respondsToSelector:@selector(isRunning)]) {
+                        running = @([app isRunning]);
+                        return;
+                    }
+                }
+            }
+        }
+        id app = [controller respondsToSelector:@selector(applicationWithBundleIdentifier:)] ?
+            [controller applicationWithBundleIdentifier:bundleID] : nil;
+        if ([app respondsToSelector:@selector(isRunning)]) running = @([app isRunning]);
     };
     if ([NSThread isMainThread]) readState();
     else dispatch_sync(dispatch_get_main_queue(), readState);
@@ -159,19 +187,13 @@ NSInteger zxTerminateApplication(NSString *bundleID, NSError **error) {
         return -1;
     }
     NSNumber *state = zxRunningState(bundleID);
-    if (!state) {
-        if (error) *error = zxProcessError(@"Application running state unavailable");
-        return -1;
-    }
-    if (!state.boolValue) return 0;
+    if (state && !state.boolValue) return 0;
     if (!zxRequestTermination(bundleID, error)) return -1;
+    if (!state) return 1;
     for (int attempt = 0; attempt < 50; ++attempt) {
         usleep(100000);
         state = zxRunningState(bundleID);
-        if (!state) {
-            if (error) *error = zxProcessError(@"Application running state unavailable");
-            return -1;
-        }
+        if (!state) return 1;
         if (!state.boolValue) return 1;
     }
     if (error) *error = zxProcessError(@"Application did not exit after termination request");

@@ -164,7 +164,7 @@ class zxtouch:
         return bundle_id
 
     def kill_process(self, bundle_id):
-        """Terminate an installed Bundle ID; return (True, 1) once stopped, (True, 0) if idle."""
+        """Terminate a Bundle ID; 1 means exited or request accepted if state is unavailable, 0 means idle."""
         self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_KILL_PROCESS, self._require_bundle_id(bundle_id)))
         success, result = self._recv_response()
         if not success:

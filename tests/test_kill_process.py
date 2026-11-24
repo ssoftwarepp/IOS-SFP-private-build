@@ -41,6 +41,9 @@ class KillProcessTests(unittest.TestCase):
     def test_installed_app_not_running_returns_zero(self):
         self.assertEqual(make_client(b"0;;0\r\n").kill_process("com.apple.Preferences"), (True, 0))
 
+    def test_unknown_state_reports_accepted_termination_request(self):
+        self.assertEqual(make_client(b"0;;1\r\n").kill_process("com.yy.kiwi"), (True, 1))
+
     def test_termination_error_returns_failure(self):
         self.assertEqual(make_client(b"-1;;Application did not exit\r\n").kill_process("com.apple.Preferences"),
                          (False, "Application did not exit"))
@@ -58,8 +61,12 @@ class KillProcessTests(unittest.TestCase):
         self.assertIn("zxTerminateApplication(bundleID, &error)", task)
         self.assertIn("zxApplicationProxy(bundleID)", source)
         self.assertIn("terminateApplication:forReason:andReport:withDescription:", source)
-        self.assertIn("zxSpringBoardApplication(bundleID)", source)
-        self.assertIn("if (!state.boolValue) return 1", source)
+        self.assertIn("[controller runningApplications]", source)
+        self.assertIn("[controller allApplications]", source)
+        self.assertIn("if (state && !state.boolValue) return 0;", source)
+        self.assertLess(source.index("if (!zxRequestTermination(bundleID, error))"),
+                        source.index("if (!state) return 1;"))
+        self.assertIn("if (!state.boolValue) return 1;", source)
         self.assertNotIn('proc_pidpath', source)
         self.assertNotIn('kill(pid, SIGTERM)', source)
 
