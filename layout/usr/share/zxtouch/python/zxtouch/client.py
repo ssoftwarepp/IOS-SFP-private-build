@@ -157,15 +157,31 @@ class zxtouch:
         self.s.send(datahandler.format_socket_data(tasktypes.TASK_PROCESS_BRING_FOREGROUND, bundle_identifier))
         return self._recv_response()
 
-    def kill_process(self, name):
-        """Send SIGTERM to processes with exactly this executable name."""
-        if not isinstance(name, str) or not name or ";;" in name or any(ord(ch) < 32 or ord(ch) == 127 for ch in name):
-            raise ValueError("name must be a nonempty process executable name")
-        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_KILL_PROCESS, name))
+    @staticmethod
+    def _require_bundle_id(bundle_id):
+        if not isinstance(bundle_id, str) or not bundle_id or ";;" in bundle_id or any(ord(ch) < 32 or ord(ch) == 127 for ch in bundle_id):
+            raise ValueError("bundle_id must be a nonempty Bundle ID without control characters")
+        return bundle_id
+
+    def kill_process(self, bundle_id):
+        """Send SIGTERM to running processes belonging to an installed Bundle ID."""
+        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_KILL_PROCESS, self._require_bundle_id(bundle_id)))
         success, result = self._recv_response()
         if not success:
             return False, result
         return True, int(result[0])
+
+    def get_installed_apps(self):
+        """Return {'apps': [{'bundleId': ..., 'name': ..., 'type': ...}]} from the device."""
+        return self._json_request(tasktypes.TASK_LIST_INSTALLED_APPS)
+
+    def clear_app_data(self, bundle_id):
+        """Terminate an installed app and clear its Documents, Library and tmp contents."""
+        return self._json_request(tasktypes.TASK_CLEAR_APP_DATA, self._require_bundle_id(bundle_id))
+
+    def get_foreground_process_name(self):
+        """Return the foreground application's executable name."""
+        return self._json_request(tasktypes.TASK_GET_FOREGROUND_PROCESS_NAME)["name"]
 
     def show_alert_box(self, title, content, duration):
         """Show alert box on device
@@ -347,25 +363,19 @@ class zxtouch:
         return self._recv_response()
 
     def get_text_from_clipboard(self):
-        """Get text from clip board
-
-        :return: Result tuple: (success?, error_message/return value)
-        """
-        self.s.send(
-            datahandler.format_socket_data(tasktypes.TASK_KEYBOARDIMPL, kbdtasktypes.KEYBOARD_GET_TEXT_FROM_CLIPBOARD))
-        result = self._recv_response()
-        if not result[0]:
-            return False, result[1]
-        return True, result[1][0]
+        """Return (True, text) or (False, error), preserving newlines and separators."""
+        try:
+            return True, self._json_request(tasktypes.TASK_GET_CLIPBOARD_TEXT)["text"]
+        except RuntimeError as error:
+            return False, str(error)
 
     def set_clipboard_text(self, text):
-        """Set clipboard text
-
-        :param text: text to set
-        :return: Result tuple: (success?, error_message/return value)
-        """
-        self.s.send(
-            datahandler.format_socket_data(tasktypes.TASK_KEYBOARDIMPL, kbdtasktypes.KEYBOARD_SAVE_TEXT_TO_CLIPBOARD, text))
+        """Set a Unicode string on the device clipboard; return (success, result)."""
+        import base64
+        if not isinstance(text, str):
+            raise TypeError("text must be str")
+        payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_SET_CLIPBOARD_TEXT, payload))
         return self._recv_response()
 
     def insert_text(self, text):
@@ -556,6 +566,26 @@ class zxtouch:
         if length <= 0:
             raise RuntimeError("Invalid ZXTouch AX response length")
         return decode_mcp_elements(self._recv_exact(length))
+
+    def _json_request(self, task, value=None):
+        """Read a length-framed JSON response to a raw task request."""
+        import json
+        if value is None:
+            self.s.sendall(datahandler.format_socket_data(task))
+        else:
+            self.s.sendall(datahandler.format_socket_data(task, value))
+        fields = self._recv_line()[:-2].split(b";;")
+        if not fields or fields[0] != b"0":
+            raise RuntimeError(fields[1].decode("utf-8", errors="replace") if len(fields) > 1 else "device request failed")
+        if len(fields) != 3 or fields[1] != b"application/json":
+            raise RuntimeError("Malformed JSON response header")
+        try:
+            length = int(fields[2])
+        except ValueError as error:
+            raise RuntimeError("Malformed JSON response length") from error
+        if length <= 0 or length > 16 * 1024 * 1024:
+            raise RuntimeError("Invalid JSON response length")
+        return json.loads(self._recv_exact(length))
 
     def _json_query(self, task, payload):
         """Send a base64 JSON request and read one length-framed JSON response."""

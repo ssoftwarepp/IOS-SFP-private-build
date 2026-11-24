@@ -28,6 +28,32 @@
 
 extern CFRunLoopRef recordRunLoop;
 
+static void zxReplyJSON(id object, CFWriteStreamRef stream) {
+    NSData *body = [NSJSONSerialization dataWithJSONObject:object options:0 error:nil];
+    if (!body) {
+        notifyClient((UInt8 *)"-1;;Unable to encode response\r\n", stream);
+        return;
+    }
+    NSData *header = [[NSString stringWithFormat:@"0;;application/json;;%lu\r\n",
+        (unsigned long)body.length] dataUsingEncoding:NSUTF8StringEncoding];
+    if (notifyClientData(header.bytes, (CFIndex)header.length, stream) == 0)
+        notifyClientData(body.bytes, (CFIndex)body.length, stream);
+}
+
+static NSString *zxBundleIDFromRequest(UInt8 *data) {
+    NSString *identifier = [NSString stringWithUTF8String:(const char *)data];
+    if (!identifier.length || [identifier rangeOfString:@";;"].location != NSNotFound ||
+        [identifier rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location != NSNotFound)
+        return nil;
+    return identifier;
+}
+
+static void zxReplyError(NSError *error, CFWriteStreamRef stream) {
+    NSString *detail = error.localizedDescription ?: @"Application operation failed";
+    NSString *reply = [NSString stringWithFormat:@"-1;;%@\r\n", detail];
+    notifyClient((UInt8 *)reply.UTF8String, stream);
+}
+
 /*
 get task type
 */
@@ -523,50 +549,64 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
     }
     else if (taskType == TASK_KILL_PROCESS)
     {
-        @autoreleasepool {
-            NSString *name = [NSString stringWithUTF8String:(const char *)eventData];
-            if (!name.length || [name rangeOfCharacterFromSet:[NSCharacterSet controlCharacterSet]].location != NSNotFound ||
-                [name rangeOfString:@";;"].location != NSNotFound) {
-                notifyClient((UInt8 *)"-1;;Invalid process name\r\n", writeStreamRef);
-                return;
-            }
-            void *libproc = dlopen("/usr/lib/libproc.dylib", RTLD_LAZY);
-            typedef int (*ZXListPIDs)(uint32_t, uint32_t, void *, int);
-            typedef int (*ZXPIDPath)(int, void *, uint32_t);
-            ZXListPIDs listPIDs = libproc ? (ZXListPIDs)dlsym(libproc, "proc_listpids") : NULL;
-            ZXPIDPath pidPath = libproc ? (ZXPIDPath)dlsym(libproc, "proc_pidpath") : NULL;
-            if (!listPIDs || !pidPath) {
-                notifyClient((UInt8 *)"-1;;Process enumeration unavailable\r\n", writeStreamRef);
-                return;
-            }
-            int bytes = listPIDs(1, 0, NULL, 0);
-            if (bytes <= 0) {
-                notifyClient((UInt8 *)"-1;;Unable to list processes\r\n", writeStreamRef);
-                return;
-            }
-            NSMutableData *buffer = [NSMutableData dataWithLength:(NSUInteger)bytes + 1024 * sizeof(pid_t)];
-            int used = listPIDs(1, 0, buffer.mutableBytes, (int)buffer.length);
-            if (used < 0) {
-                notifyClient((UInt8 *)"-1;;Unable to list processes\r\n", writeStreamRef);
-                return;
-            }
-            NSUInteger killed = 0;
-            int failure = 0;
-            pid_t *pids = (pid_t *)buffer.mutableBytes;
-            for (int i = 0; i < used / (int)sizeof(pid_t); ++i) {
-                pid_t pid = pids[i];
-                if (pid <= 1 || pid == getpid()) continue;
-                char executable[4096] = {0};
-                if (pidPath(pid, executable, sizeof(executable)) <= 0) continue;
-                NSString *path = [NSString stringWithUTF8String:executable];
-                if (![path.lastPathComponent isEqualToString:name]) continue;
-                if (kill(pid, SIGTERM) == 0) ++killed;
-                else if (!failure) failure = errno;
-            }
-            NSString *reply = failure ? [NSString stringWithFormat:@"-1;;signal failed: %d\r\n", failure] :
-                                        [NSString stringWithFormat:@"0;;%lu\r\n", (unsigned long)killed];
+        NSString *bundleID = zxBundleIDFromRequest(eventData);
+        if (!bundleID) {
+            notifyClient((UInt8 *)"-1;;Invalid Bundle ID\r\n", writeStreamRef);
+            return;
+        }
+        NSError *error = nil;
+        NSInteger count = zxTerminateApplication(bundleID, &error);
+        if (count < 0) zxReplyError(error, writeStreamRef);
+        else {
+            NSString *reply = [NSString stringWithFormat:@"0;;%ld\r\n", (long)count];
             notifyClient((UInt8 *)reply.UTF8String, writeStreamRef);
         }
+    }
+    else if (taskType == TASK_LIST_INSTALLED_APPS)
+    {
+        NSArray *apps = zxInstalledApplications();
+        if (!apps) notifyClient((UInt8 *)"-1;;Unable to list installed applications\r\n", writeStreamRef);
+        else zxReplyJSON(@{@"apps": apps}, writeStreamRef);
+    }
+    else if (taskType == TASK_GET_CLIPBOARD_TEXT)
+    {
+        __block NSString *text = nil;
+        void (^readClipboard)(void) = ^{ text = UIPasteboard.generalPasteboard.string ?: @""; };
+        if (NSThread.isMainThread) readClipboard();
+        else dispatch_sync(dispatch_get_main_queue(), readClipboard);
+        zxReplyJSON(@{@"text": text}, writeStreamRef);
+    }
+    else if (taskType == TASK_SET_CLIPBOARD_TEXT)
+    {
+        NSData *decoded = [[NSData alloc] initWithBase64EncodedString:
+            [NSString stringWithUTF8String:(const char *)eventData] options:0];
+        NSString *text = decoded ? [[NSString alloc] initWithData:decoded encoding:NSUTF8StringEncoding] : nil;
+        if (!text) {
+            notifyClient((UInt8 *)"-1;;Invalid clipboard text\r\n", writeStreamRef);
+            return;
+        }
+        void (^writeClipboard)(void) = ^{ UIPasteboard.generalPasteboard.string = text; };
+        if (NSThread.isMainThread) writeClipboard();
+        else dispatch_sync(dispatch_get_main_queue(), writeClipboard);
+        notifyClient((UInt8 *)"0\r\n", writeStreamRef);
+    }
+    else if (taskType == TASK_CLEAR_APP_DATA)
+    {
+        NSString *bundleID = zxBundleIDFromRequest(eventData);
+        if (!bundleID) {
+            notifyClient((UInt8 *)"-1;;Invalid Bundle ID\r\n", writeStreamRef);
+            return;
+        }
+        NSError *error = nil;
+        NSDictionary *result = zxClearApplicationData(bundleID, &error);
+        if (!result) zxReplyError(error, writeStreamRef);
+        else zxReplyJSON(result, writeStreamRef);
+    }
+    else if (taskType == TASK_GET_FOREGROUND_PROCESS_NAME)
+    {
+        NSString *name = zxForegroundProcessName();
+        if (!name) notifyClient((UInt8 *)"-1;;Foreground process unavailable\r\n", writeStreamRef);
+        else zxReplyJSON(@{@"name": name}, writeStreamRef);
     }
     else if (taskType == TASK_UPDATE_CACHE)
     {

@@ -32,6 +32,11 @@
 #define TASK_ACCESSIBILITY_AT_POINT 34
 #define TASK_KILL_PROCESS 35
 #define TASK_SHOW_SCRIPT_SETTINGS 36
+#define TASK_LIST_INSTALLED_APPS 42
+#define TASK_GET_CLIPBOARD_TEXT 43
+#define TASK_CLEAR_APP_DATA 44
+#define TASK_GET_FOREGROUND_PROCESS_NAME 45
+#define TASK_SET_CLIPBOARD_TEXT 46
 
 
 // Used only by zxtouch-runner on its own connection. See Runner.h.
