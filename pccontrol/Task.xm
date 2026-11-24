@@ -36,8 +36,8 @@ static void zxReplyJSON(id object, CFWriteStreamRef stream) {
     }
     NSData *header = [[NSString stringWithFormat:@"0;;application/json;;%lu\r\n",
         (unsigned long)body.length] dataUsingEncoding:NSUTF8StringEncoding];
-    if (notifyClientData(header.bytes, (CFIndex)header.length, stream) == 0)
-        notifyClientData(body.bytes, (CFIndex)body.length, stream);
+    if (notifyClientData((const UInt8 *)header.bytes, (CFIndex)header.length, stream) == 0)
+        notifyClientData((const UInt8 *)body.bytes, (CFIndex)body.length, stream);
 }
 
 static NSString *zxBundleIDFromRequest(UInt8 *data) {
