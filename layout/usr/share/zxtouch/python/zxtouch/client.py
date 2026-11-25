@@ -671,15 +671,19 @@ class zxtouch:
             payload["region"] = list(region)
         return self._json_query(tasktypes.TASK_MASKED_TEMPLATE_MATCH, payload)
 
-    def get_element_tree(self, timeout=10):
+    def get_element_tree(self, timeout=None, budget_ms=3000):
         """Return the frontmost application's AX hierarchy within timeout seconds."""
+        if isinstance(budget_ms, bool) or not isinstance(budget_ms, int) or not 100 <= budget_ms <= 30000:
+            raise ValueError("AX budget_ms must be an integer from 100 to 30000")
+        if timeout is None:
+            timeout = max(10, budget_ms / 1000.0 + 5)
         with self._ax_deadline(timeout):
-            return self._get_element_tree()
+            return self._get_element_tree(budget_ms)
 
-    def _get_element_tree(self):
+    def _get_element_tree(self, budget_ms):
         import json
 
-        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_ACCESSIBILITY_HIERARCHY))
+        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_ACCESSIBILITY_HIERARCHY, budget_ms))
         fields = self._recv_line()[:-2].split(b";;")
         if not fields or fields[0] != b"0":
             detail = fields[1].decode("utf-8", errors="replace") if len(fields) > 1 else "unknown error"
@@ -700,11 +704,11 @@ class zxtouch:
         return tree
 
     def find_tree_elements(self, *, identifier=None, label=None, value=None,
-                           role=None, tree=None, timeout=10):
+                           role=None, tree=None, timeout=None, budget_ms=3000):
         """Find nodes recursively by their native AX attributes."""
         from zxtouch.ax import find_tree_elements
         if tree is None:
-            tree = self.get_element_tree(timeout=timeout)
+            tree = self.get_element_tree(timeout=timeout, budget_ms=budget_ms)
         return find_tree_elements(tree, identifier=identifier, label=label,
                                   value=value, role=role)
 

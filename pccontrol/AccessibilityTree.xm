@@ -28,7 +28,6 @@ static ZXValueGet zxValueGet = NULL;
 static const NSUInteger zxMaxCandidates = 2000;
 static const NSUInteger zxMaxTreeNodes = 2002;
 static const NSUInteger zxMaxDepth = 16;
-static const CFTimeInterval zxTreeBudget = 3.0;
 
 static NSString *zxString(CFTypeRef value)
 {
@@ -272,12 +271,21 @@ static void zxAppendCandidates(CFTypeRef source, NSString *sourcePath, NSMutable
 }
 
 static NSDictionary *zxNode(CFTypeRef application, NSUInteger depth, NSUInteger *count,
-                             NSUInteger *candidateCount, BOOL *limitReached)
+                             NSUInteger *candidateCount, BOOL *limitReached,
+                              NSTimeInterval budget, NSMutableDictionary *sourceCounts)
 {
     *count = 1;
     *candidateCount = 0;
     *limitReached = NO;
-    CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + zxTreeBudget;
+    CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + budget;
+    if (sourceCounts) {
+        for (NSNumber *attribute in @[@3015, @2095]) {
+            CFTypeRef raw = zxNumericAttribute(application, attribute.unsignedIntValue);
+            if (!raw) continue;
+            sourceCounts[attribute.stringValue] = @(CFGetTypeID(raw) == CFArrayGetTypeID() ? CFArrayGetCount((CFArrayRef)raw) : 1);
+            CFRelease(raw);
+        }
+    }
     CFTypeID elementType = CFGetTypeID(application);
     NSMutableDictionary *root = zxLeafNode(application);
     root[@"role"] = @"AXApplication";
@@ -362,8 +370,13 @@ static pid_t zxPIDFromObject(id object)
     return 0;
 }
 
-NSData *zxCopyAccessibilityTree(NSError **error)
+NSData *zxCopyAccessibilityTreeWithBudget(NSTimeInterval budget, NSError **error)
 {
+    if (!isfinite(budget) || budget < 0.1 || budget > 30.0) {
+        if (error) *error = [NSError errorWithDomain:@"ZXTouchAX" code:6
+                                            userInfo:@{NSLocalizedDescriptionKey: @"AX budget must be 100 to 30000 milliseconds"}];
+        return nil;
+    }
     static NSObject *captureLock;
     static dispatch_once_t lockOnce;
     dispatch_once(&lockOnce, ^{ captureLock = [NSObject new]; });
@@ -428,6 +441,7 @@ NSData *zxCopyAccessibilityTree(NSError **error)
     ZXSetTimeout setTimeout = (ZXSetTimeout)dlsym(runtime, "AXUIElementSetMessagingTimeout");
     __block NSUInteger count = 0;
     __block NSUInteger candidateCount = 0;
+    __block NSMutableDictionary *sourceCounts = nil;
     __block BOOL limitReached = NO;
     __block NSDictionary *tree = nil;
     __block NSString *failure = nil;
@@ -453,7 +467,8 @@ NSData *zxCopyAccessibilityTree(NSError **error)
                 return;
             }
             if (setTimeout) setTimeout(application, 0.5f);
-            tree = zxNode(application, 0, &count, &candidateCount, &limitReached);
+            sourceCounts = [@{@"2095": [NSNull null], @"3015": [NSNull null]} mutableCopy];
+            tree = zxNode(application, 0, &count, &candidateCount, &limitReached, budget, sourceCounts);
             if (count <= 1) {
                 NSMutableArray *details = [NSMutableArray array];
                 const uint32_t numericIDs[] = {3015, 3025, 3022, 3029, 3031, 3032, 5001};
@@ -486,6 +501,8 @@ NSData *zxCopyAccessibilityTree(NSError **error)
     }
     return [NSJSONSerialization dataWithJSONObject:@{@"pid": @(pid), @"count": @(count),
                                                      @"candidateCount": @(candidateCount),
+                                                     @"sourceCounts": sourceCounts ?: @{},
+                                                     @"budgetMs": @(budget * 1000),
                                                      @"limitReached": @(limitReached),
                                                      @"root": tree} options:0 error:error];
     }

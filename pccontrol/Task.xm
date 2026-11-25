@@ -424,7 +424,18 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
         @autoreleasepool {
             if (!writeStreamRef) return;
             NSError *error = nil;
-            NSData *treeData = zxCopyAccessibilityTree(&error);
+            NSString *budgetText = [NSString stringWithUTF8String:(const char *)eventData];
+            NSTimeInterval budget = 3.0;
+            if (budgetText.length) {
+                NSScanner *scanner = [NSScanner scannerWithString:budgetText];
+                NSInteger milliseconds = 0;
+                if (![scanner scanInteger:&milliseconds] || !scanner.isAtEnd || milliseconds < 100 || milliseconds > 30000) {
+                    notifyClient((UInt8 *)"-1;;AX budget must be 100 to 30000 milliseconds\r\n", writeStreamRef);
+                    return;
+                }
+                budget = milliseconds / 1000.0;
+            }
+            NSData *treeData = zxCopyAccessibilityTreeWithBudget(budget, &error);
             if (!treeData) {
                 NSLog(@"com.zjx.springboard: AX hierarchy failed: %@", error);
                 NSString *detail = error ? [NSString stringWithFormat:@"%@: %ld: %@",

@@ -81,7 +81,7 @@ class AXProtocolTests(unittest.TestCase):
         self.assertIn("getFrontMostApplication()", lookup)
         self.assertIn("if ([NSThread isMainThread]) readForegroundPID();", source)
         self.assertIn("else dispatch_sync(dispatch_get_main_queue(), readForegroundPID);", source)
-        self.assertIn('tree = zxNode(application, 0, &count, &candidateCount, &limitReached);', source)
+        self.assertIn('tree = zxNode(application, 0, &count, &candidateCount, &limitReached, budget, sourceCounts);', source)
         self.assertIn('else dispatch_sync(dispatch_get_main_queue(), capture);', source)
         self.assertIn('if (attempt < 3 && ![NSThread isMainThread]) usleep(delays[attempt]);', source)
 
@@ -152,7 +152,7 @@ class AXProtocolTests(unittest.TestCase):
         self.assertIn('@"source": @"candidateGroup"', source)
         self.assertIn('root[@"children"] = children;', source)
         self.assertIn('zxMaxDepth = 16', source)
-        self.assertIn('zxTreeBudget = 3.0', source)
+        self.assertIn('CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + budget;', source)
         self.assertIn('zxMaxTreeNodes = 2002', source)
         self.assertLess(source.index('zxWalkChildren(application, root,'),
                         source.index('zxAppendCandidates((__bridge CFTypeRef)item[@"element"]'))
@@ -213,7 +213,32 @@ class AXProtocolTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0]["label"], "通用")
         self.assertEqual(device.s.sent, [datahandler.format_socket_data(
-            tasktypes.TASK_ACCESSIBILITY_HIERARCHY)])
+            tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 3000)])
+
+    def test_hierarchy_budget_request_and_validation(self):
+        tree = {"pid": 123, "count": 2, "candidateCount": 1,
+                "sourceCounts": {"2095": 1, "3015": 2}, "budgetMs": 12000,
+                "limitReached": False, "root": {"role": "AXApplication", "children": []}}
+        device = make_device([framed_response(tree)])
+        self.assertEqual(device.get_element_tree(timeout=15, budget_ms=12000), tree)
+        self.assertEqual(device.s.sent, [datahandler.format_socket_data(
+            tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 12000)])
+        for invalid in (0, 99, 30001, 3.0, "3000", True):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                device.get_element_tree(budget_ms=invalid)
+
+    def test_hierarchy_source_counts_and_budget_are_exposed(self):
+        source = (Path(__file__).resolve().parent.parent / "pccontrol" /
+                  "AccessibilityTree.xm").read_text(encoding="utf-8")
+        task = (Path(__file__).resolve().parent.parent / "pccontrol" /
+                "Task.xm").read_text(encoding="utf-8")
+        self.assertIn("const uint32_t candidateIDs[] = {3015, 3025, 3022, 3029, 3031, 3032};", source)
+        self.assertIn('for (NSNumber *attribute in @[@3015, @2095])', source)
+        self.assertIn('sourceCounts[attribute.stringValue] = @(CFGetTypeID(raw) == CFArrayGetTypeID()', source)
+        self.assertIn('@"sourceCounts": sourceCounts', source)
+        self.assertIn('@"budgetMs": @(budget * 1000)', source)
+        self.assertIn('zxNode(application, 0, &count, &candidateCount, &limitReached, budget, sourceCounts)', source)
+        self.assertIn('zxCopyAccessibilityTreeWithBudget(budget, &error)', task)
 
     def test_hierarchy_label_regex_keeps_other_filters_exact(self):
         tree = {"root": {"role": "AXApplication", "children": [
@@ -284,6 +309,9 @@ class AXProtocolTests(unittest.TestCase):
     def test_filter_methods_pass_timeout_when_fetching(self):
         device = make_device([framed_response({"root": {"role": "AXButton", "children": []}})])
         self.assertEqual(len(device.find_tree_elements(role="AXButton", timeout=2)), 1)
+        with patch.object(device, "get_element_tree", return_value={"root": {"role": "AXButton", "children": []}}) as get_tree:
+            self.assertEqual(len(device.find_tree_elements(role="AXButton", budget_ms=12000)), 1)
+            get_tree.assert_called_once_with(timeout=None, budget_ms=12000)
         with patch.object(device, "get_ui_elements", return_value={"elements": []}) as get_ui:
             self.assertEqual(device.find_elements(text="missing", timeout=3), [])
             get_ui.assert_called_once_with(timeout=3)

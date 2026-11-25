@@ -11,7 +11,13 @@
         ZXRemoteDashboardServer *owner = weakSelf;
         if (!owner || ![owner requestIsAuthorized:request]) return [owner unauthorizedResponse];
         NSString *error = nil;
-        NSData *data = [owner framedSocketCommand:@"32" mime:@"application/json" error:&error];
+        NSString *budgetText = [request.query[@"budgetMs"] isKindOfClass:[NSString class]] ? request.query[@"budgetMs"] : @"3000";
+        NSScanner *scanner = [NSScanner scannerWithString:budgetText];
+        NSInteger budgetMs = 0;
+        if (![scanner scanInteger:&budgetMs] || !scanner.isAtEnd || budgetMs < 100 || budgetMs > 30000)
+            return [owner jsonResponse:@{ @"ok": @NO, @"error": @"budgetMs 必须为 100 到 30000 的整数" } status:400];
+        NSString *command = [NSString stringWithFormat:@"32%ld", (long)budgetMs];
+        NSData *data = [owner framedSocketCommand:command mime:@"application/json" error:&error];
         if (!data) return [owner jsonResponse:@{ @"ok": @NO, @"error": error ?: @"元素查询失败" } status:502];
         NSDictionary *tree = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
         if (![tree isKindOfClass:[NSDictionary class]] || ![tree[@"root"] isKindOfClass:[NSDictionary class]]) {

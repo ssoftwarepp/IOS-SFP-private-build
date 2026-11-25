@@ -15,7 +15,8 @@ class DashboardToolsTests(unittest.TestCase):
             "/api/script", "/api/script", "/api/script/new",
         ])
         self.assertEqual(server.count("[owner requestIsAuthorized:request]"), len(routes))
-        self.assertIn("framedSocketCommand:@\"32\" mime:@\"application/json\"", server)
+        self.assertIn('request.query[@"budgetMs"]', server)
+        self.assertIn('framedSocketCommand:command mime:@"application/json"', server)
         advanced = (ROOT / "zxtouch/zxtouch/AdvancedTools.inc").read_text(encoding="utf-8")
         advanced_routes = re.findall(r'path:@"(/api/[^\"]+)"', advanced)
         self.assertEqual(advanced_routes, ["/api/ax/point", "/api/image/templates",

@@ -216,7 +216,7 @@ static NSString *ZXDashboardIPAddress(void)
 {
     int fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0) { if (error) *error = @"创建本机连接失败"; return nil; }
-    struct timeval timeout = {35, 0};
+    struct timeval timeout = {45, 0};
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
     struct sockaddr_in addr = {0};
