@@ -570,7 +570,9 @@ NSData *zxCopyAccessibilityVisible2095WithBudget(NSTimeInterval budget, NSError 
     @synchronized (visibleLock) {
         __block pid_t pid = 0;
         __block NSDictionary *snapshot = nil;
+        __block NSString *failureStage = @"not-started";
         void (^capture)(void) = ^{
+            failureStage = @"foreground-pid";
             void *frontBoard = dlopen("/System/Library/PrivateFrameworks/AXFrontBoardUtils.framework/AXFrontBoardUtils", RTLD_LAZY);
             ZXFocusedPID focusedPID = frontBoard ? (ZXFocusedPID)dlsym(frontBoard, "AXFrontBoardFocusedAppPID") : NULL;
             pid = focusedPID ? focusedPID() : 0;
@@ -584,18 +586,22 @@ NSData *zxCopyAccessibilityVisible2095WithBudget(NSTimeInterval budget, NSError 
                 if (!zxIsLivePID(pid) && (!app || [bundleID isEqualToString:@"com.apple.springboard"])) pid = getpid();
             }
             if (!zxIsLivePID(pid)) return;
-            dlopen("/System/Library/PrivateFrameworks/AXRuntime.framework/AXRuntime", RTLD_NOW | RTLD_GLOBAL);
+            failureStage = @"application-class";
+            void *runtime = dlopen("/System/Library/PrivateFrameworks/AXRuntime.framework/AXRuntime", RTLD_NOW | RTLD_GLOBAL);
             Class elementClass = NSClassFromString(@"AXUIElement");
-            if (!elementClass || ![elementClass respondsToSelector:@selector(uiApplicationWithPid:)]) return;
+            if (!runtime || !elementClass || ![elementClass respondsToSelector:@selector(uiApplicationWithPid:)]) return;
             ZXSetRequestingClient requestingClient = (ZXSetRequestingClient)dlsym(RTLD_DEFAULT, "__AXSetRequestingClient");
-            ZXValueGet getValue = (ZXValueGet)dlsym(RTLD_DEFAULT, "AXValueGetValue");
+            ZXValueGet getValue = (ZXValueGet)dlsym(runtime, "AXValueGetValue");
             if (requestingClient) requestingClient(2);
+            failureStage = @"ax-value-symbol";
             if (!getValue) return;
+            failureStage = @"application-element";
             id application = [(id<ZXVisibleAXElement>)elementClass uiApplicationWithPid:pid];
-            if (!application) return;
+            if (!application || ![application respondsToSelector:@selector(uiElementsWithAttribute:)]) return;
             ZXSetTimeout setTimeout = (ZXSetTimeout)dlsym(RTLD_DEFAULT, "AXUIElementSetMessagingTimeout");
             if (setTimeout) setTimeout((__bridge CFTypeRef)application, 0.5f);
             CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + budget;
+            failureStage = @"visible-list";
             NSArray *visible = [application uiElementsWithAttribute:2095];
             if (![visible isKindOfClass:[NSArray class]]) return;
             id list3015 = [application uiElementsWithAttribute:3015];
@@ -623,8 +629,10 @@ NSData *zxCopyAccessibilityVisible2095WithBudget(NSTimeInterval budget, NSError 
         if ([NSThread isMainThread]) capture();
         else dispatch_sync(dispatch_get_main_queue(), capture);
         if (!snapshot) {
+            NSString *detail = [NSString stringWithFormat:@"AX 2095 capture failed: stage=%@ pid=%d", failureStage, pid];
+            NSLog(@"com.zjx.springboard: %@", detail);
             if (error) *error = [NSError errorWithDomain:@"ZXTouchAX" code:7
-                                                userInfo:@{NSLocalizedDescriptionKey: @"AX 2095 visible elements unavailable"}];
+                                                userInfo:@{NSLocalizedDescriptionKey: detail}];
             return nil;
         }
         return [NSJSONSerialization dataWithJSONObject:snapshot options:0 error:error];

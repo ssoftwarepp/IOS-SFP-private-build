@@ -251,6 +251,19 @@ class AXProtocolTests(unittest.TestCase):
                 "Task.xm").read_text(encoding="utf-8")
         self.assertIn('zxCopyAccessibilityVisible2095WithBudget(budget, &error)', task)
 
+    def test_visible2095_failure_reports_capture_stage(self):
+        source = (Path(__file__).resolve().parent.parent / "pccontrol" /
+                  "AccessibilityTree.xm").read_text(encoding="utf-8")
+        for stage in ("foreground-pid", "application-class", "ax-value-symbol",
+                      "application-element", "visible-list"):
+            self.assertIn('failureStage = @"' + stage + '";', source)
+        self.assertIn('AX 2095 capture failed: stage=%@ pid=%d', source)
+        self.assertIn('dlsym(runtime, "AXValueGetValue")', source)
+        self.assertIn('if (![visible isKindOfClass:[NSArray class]]) return;', source)
+        device = make_device([b'-1;;ZXTouchAX: 7: AX 2095 capture failed: stage=visible-list pid=33256\r\n'])
+        with self.assertRaisesRegex(RuntimeError, 'stage=visible-list pid=33256'):
+            device.get_element_tree(mode="visible2095")
+
     def test_hierarchy_source_counts_and_budget_are_exposed(self):
         source = (Path(__file__).resolve().parent.parent / "pccontrol" /
                   "AccessibilityTree.xm").read_text(encoding="utf-8")
