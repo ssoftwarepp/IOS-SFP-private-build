@@ -6,12 +6,10 @@
 #include "Runner.h"
 
 
-CFSocketRef socketRef;
-CFWriteStreamRef writeStreamRef = NULL;
-CFReadStreamRef readStreamRef = NULL;
 static NSMutableDictionary *socketClients = NULL;
 static NSMutableDictionary *socketClientBuffers = NULL;
 static NSMutableDictionary *socketClientQueues = NULL;
+static NSMutableDictionary *socketClientHandles = NULL;
 // Write streams of clients connected from this device. Read from task queues
 // and written from the run loop thread, so access goes through @synchronized.
 static NSMutableSet *socketLoopbackClients = NULL;
@@ -44,7 +42,9 @@ void socketServer()
         
         CFDataRef address = CFDataCreate(kCFAllocatorDefault,  (UInt8 *)&Socketaddr, sizeof(Socketaddr));
         
-        if (CFSocketSetAddress(_socket, address) != kCFSocketSuccess) {
+        CFSocketError bindResult = CFSocketSetAddress(_socket, address);
+        CFRelease(address);
+        if (bindResult != kCFSocketSuccess) {
             NSLog(@"### com.zjx.springboard: failed to bind socket on port %d", PORT);
             [@"socket-bind-failed" writeToFile:@"/var/mobile/d_sockfail.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
             if (_socket) CFRelease(_socket);
@@ -55,6 +55,7 @@ void socketServer()
         socketClients = [[NSMutableDictionary alloc] init];
         socketClientBuffers = [[NSMutableDictionary alloc] init];
         socketClientQueues = [[NSMutableDictionary alloc] init];
+        socketClientHandles = [[NSMutableDictionary alloc] init];
         socketLoopbackClients = [[NSMutableSet alloc] init];
 
         NSLog(@"### com.zjx.springboard: connection waiting");
@@ -65,42 +66,58 @@ void socketServer()
 
         CFRelease(source);
         CFRunLoopRun();
+        CFSocketInvalidate(_socket);
+        CFRelease(_socket);
     }
 
 }
 
-static void readStream(CFReadStreamRef readStream, CFStreamEventType eventype, void * clientCallBackInfo)
+static void zxCloseSocketClient(CFReadStreamRef readStream)
 {
-    // This callback and TCPServerAcceptCallBack both run on the socket server's
-    // run loop thread, so every access to the client dictionaries happens on one
-    // thread and needs no locking. Only the parsed command is handed off.
+    // Both stream callbacks and accepts run on the socket server's run loop.
     NSNumber *clientKey = @((long)readStream);
-
-    if (eventype == kCFStreamEventEndEncountered || eventype == kCFStreamEventErrorOccurred)
-    {
-        // The client disconnected. Drop its state, otherwise the dictionaries
-        // grow by one entry per connection for as long as SpringBoard runs.
-        id closingWriteStream = [socketClients objectForKey:clientKey];
-        if (closingWriteStream != nil) {
-            zxRunnerStreamClosed((CFWriteStreamRef)[closingWriteStream longValue]);
-            @synchronized (socketLoopbackClients) {
-                [socketLoopbackClients removeObject:closingWriteStream];
-            }
+    if (![socketClientHandles objectForKey:clientKey]) return;
+    id closingWriteStream = [socketClients objectForKey:clientKey];
+    CFWriteStreamRef writeStream = closingWriteStream ?
+        (CFWriteStreamRef)[closingWriteStream longValue] : NULL;
+    dispatch_queue_t clientQueue = [socketClientQueues objectForKey:clientKey];
+    NSNumber *socketHandle = [socketClientHandles objectForKey:clientKey];
+    if (writeStream) {
+        zxRunnerStreamClosed(writeStream);
+        @synchronized (socketLoopbackClients) {
+            [socketLoopbackClients removeObject:closingWriteStream];
         }
-
-        [socketClients removeObjectForKey:clientKey];
-        [socketClientBuffers removeObjectForKey:clientKey];
-        [socketClientQueues removeObjectForKey:clientKey];
-
-        CFReadStreamSetClient(readStream, kCFStreamEventNone, NULL, NULL);
-        CFReadStreamUnscheduleFromRunLoop(readStream, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
-        CFReadStreamClose(readStream);
-        return;
     }
 
+    [socketClients removeObjectForKey:clientKey];
+    [socketClientBuffers removeObjectForKey:clientKey];
+    [socketClientQueues removeObjectForKey:clientKey];
+    [socketClientHandles removeObjectForKey:clientKey];
+
+    CFReadStreamSetClient(readStream, kCFStreamEventNone, NULL, NULL);
+    CFReadStreamUnscheduleFromRunLoop(readStream, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
+    CFReadStreamClose(readStream);
+    CFRelease(readStream);
+    dispatch_async(clientQueue, ^{
+        CFWriteStreamClose(writeStream);
+        CFRelease(writeStream);
+        close(socketHandle.intValue);
+    });
+}
+
+static void readStream(CFReadStreamRef readStream, CFStreamEventType eventype, void * clientCallBackInfo)
+{
+    if (eventype == kCFStreamEventEndEncountered || eventype == kCFStreamEventErrorOccurred) {
+        zxCloseSocketClient(readStream);
+        return;
+    }
+    NSNumber *clientKey = @((long)readStream);
+    if (![socketClientHandles objectForKey:clientKey]) return;
     UInt8 readDataBuff[2048];
     CFIndex hasRead = CFReadStreamRead(readStream, readDataBuff, sizeof(readDataBuff));
     if (hasRead <= 0) {
+        if (hasRead < 0 || CFReadStreamGetStatus(readStream) == kCFStreamStatusAtEnd)
+            zxCloseSocketClient(readStream);
         return;
     }
 
@@ -157,11 +174,7 @@ static void readStream(CFReadStreamRef readStream, CFStreamEventType eventype, v
             }
         };
 
-        if (clientQueue != nil) {
-            dispatch_async(clientQueue, runTask);
-        } else {
-            dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), runTask);
-        }
+        dispatch_async(clientQueue, runTask);
     }
 }
 
@@ -243,49 +256,57 @@ static void TCPServerAcceptCallBack(CFSocketRef socket, CFSocketCallBackType typ
         struct sockaddr_in *addr_in = (struct sockaddr_in *)name;
         NSLog(@"### com.zjx.springboard: connection from %s:%d", inet_ntoa(addr_in->sin_addr), addr_in->sin_port);
         
-        readStreamRef = NULL;
-        writeStreamRef = NULL;
-
-        CFStreamCreatePairWithSocket(kCFAllocatorDefault, nativeSocketHandle, &readStreamRef, &writeStreamRef);
-       
-        if (readStreamRef && writeStreamRef) {
-            CFReadStreamOpen(readStreamRef);
-            CFWriteStreamOpen(writeStreamRef);
-            
-            CFStreamClientContext context = {0, NULL, NULL, NULL };
-
-            CFOptionFlags streamEvents = kCFStreamEventHasBytesAvailable |
-                                         kCFStreamEventEndEncountered |
-                                         kCFStreamEventErrorOccurred;
-            if (!CFReadStreamSetClient(readStreamRef, streamEvents, readStream, &context)) {
-                NSLog(@"### com.zjx.springboard: error 1");
-                return;
-            }
-            
-            CFReadStreamScheduleWithRunLoop(readStreamRef, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
-
-			[socketClients setObject:@((long)writeStreamRef) forKey:@((long)readStreamRef)];
-
-            if ((ntohl(addr_in->sin_addr.s_addr) >> 24) == 127) {
-                @synchronized (socketLoopbackClients) {
-                    [socketLoopbackClients addObject:@((long)writeStreamRef)];
-                }
-            }
-            [socketClientBuffers setObject:[NSMutableData data] forKey:@((long)readStreamRef)];
-
-            dispatch_queue_t clientQueue =
-                dispatch_queue_create("com.zjx.springboard.socket-client", DISPATCH_QUEUE_SERIAL);
-            if (clientQueue) {
-                [socketClientQueues setObject:clientQueue forKey:@((long)readStreamRef)];
-            }
-            //const char *str = "+++welcome++++\n";
-            
-            //CFWriteStreamWrite(writeStreamRef, (UInt8 *)str, strlen(str) + 1);	
-        }
-        else
-        {
+        CFReadStreamRef clientReadStream = NULL;
+        CFWriteStreamRef clientWriteStream = NULL;
+        CFStreamCreatePairWithSocket(kCFAllocatorDefault, nativeSocketHandle, &clientReadStream, &clientWriteStream);
+        if (!clientReadStream || !clientWriteStream) {
+            if (clientReadStream) CFRelease(clientReadStream);
+            if (clientWriteStream) CFRelease(clientWriteStream);
             close(nativeSocketHandle);
+            return;
         }
+
+        // Close the socket after queued replies finish, independently of both streams.
+        CFReadStreamSetProperty(clientReadStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+        CFWriteStreamSetProperty(clientWriteStream, kCFStreamPropertyShouldCloseNativeSocket, kCFBooleanFalse);
+        if (!CFReadStreamOpen(clientReadStream) || !CFWriteStreamOpen(clientWriteStream)) {
+            CFReadStreamClose(clientReadStream);
+            CFWriteStreamClose(clientWriteStream);
+            CFRelease(clientReadStream);
+            CFRelease(clientWriteStream);
+            close(nativeSocketHandle);
+            return;
+        }
+
+        CFStreamClientContext context = {0, NULL, NULL, NULL, NULL};
+        CFOptionFlags streamEvents = kCFStreamEventHasBytesAvailable |
+                                     kCFStreamEventEndEncountered |
+                                     kCFStreamEventErrorOccurred;
+        if (!CFReadStreamSetClient(clientReadStream, streamEvents, readStream, &context)) {
+            NSLog(@"### com.zjx.springboard: error 1");
+            CFReadStreamClose(clientReadStream);
+            CFWriteStreamClose(clientWriteStream);
+            CFRelease(clientReadStream);
+            CFRelease(clientWriteStream);
+            close(nativeSocketHandle);
+            return;
+        }
+
+        CFReadStreamScheduleWithRunLoop(clientReadStream, CFRunLoopGetCurrent(), kCFRunLoopCommonModes);
+
+        [socketClients setObject:@((long)clientWriteStream) forKey:@((long)clientReadStream)];
+        [socketClientHandles setObject:@(nativeSocketHandle) forKey:@((long)clientReadStream)];
+
+        if ((ntohl(addr_in->sin_addr.s_addr) >> 24) == 127) {
+            @synchronized (socketLoopbackClients) {
+                [socketLoopbackClients addObject:@((long)clientWriteStream)];
+            }
+        }
+        [socketClientBuffers setObject:[NSMutableData data] forKey:@((long)clientReadStream)];
+
+        dispatch_queue_t clientQueue =
+            dispatch_queue_create("com.zjx.springboard.socket-client", DISPATCH_QUEUE_SERIAL);
+        [socketClientQueues setObject:clientQueue forKey:@((long)clientReadStream)];
 		
     }
     

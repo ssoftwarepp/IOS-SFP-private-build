@@ -37,12 +37,14 @@
     if(inet_pton(AF_INET, [ip UTF8String], &serv_addr.sin_addr)<=0)
     {
         NSLog(@"### com.zjx.zxtouchb: Invalid address. Address not supported");
+        close(sock);
         return -1;
     }
 
     if (connect(sock, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0)
     {
         NSLog(@"### com.zjx.zxtouchb: \nConnection Failed \n");
+        close(sock);
         return -1;
     }
     // Never block the caller forever. playButtonClick: and friends call -recv:

@@ -91,12 +91,11 @@ void startRecording(CFWriteStreamRef requestClient, NSError **error)
     NSString *rawFilePath = [NSString stringWithFormat:@"%@/%@.raw", scriptDirectory, currentDateTime];
     [[NSFileManager defaultManager] createFileAtPath:rawFilePath contents:nil attributes:nil];
 
+    notifyClient((UInt8*)[scriptDirectory UTF8String], requestClient);
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
 
         // start recording
         NSLog(@"com.zjx.springboard: start recording.");
-        
-        notifyClient((UInt8*)[scriptDirectory UTF8String], requestClient);
 
         isRecording = true;
 
