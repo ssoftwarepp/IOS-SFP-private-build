@@ -254,10 +254,15 @@ class AXProtocolTests(unittest.TestCase):
     def test_visible2095_failure_reports_capture_stage(self):
         source = (Path(__file__).resolve().parent.parent / "pccontrol" /
                   "AccessibilityTree.xm").read_text(encoding="utf-8")
-        for stage in ("foreground-pid", "application-class", "ax-value-symbol",
-                      "application-element", "visible-list"):
+        for stage in ("foreground-pid", "runtime-load", "class-lookup",
+                      "application-method", "ax-value-symbol", "application-element", "visible-list"):
             self.assertIn('failureStage = @"' + stage + '";', source)
-        self.assertIn('AX 2095 capture failed: stage=%@ pid=%d', source)
+        self.assertIn('AX 2095 capture failed: stage=%@ pid=%d diagnostics=%@', source)
+        for field in ('runtimeLoaded', 'classBeforeLibrary', 'methodBeforeLibrary',
+                      'accessibilityLibraryLoaded', 'classFound', 'methodFound',
+                      'cCreateFound', 'cCopyFound'):
+            self.assertIn('diagnostics[@"' + field + '"]', source)
+        self.assertIn('dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW | RTLD_GLOBAL)', source)
         self.assertIn('dlsym(runtime, "AXValueGetValue")', source)
         self.assertIn('if (![visible isKindOfClass:[NSArray class]]) return;', source)
         device = make_device([b'-1;;ZXTouchAX: 7: AX 2095 capture failed: stage=visible-list pid=33256\r\n'])

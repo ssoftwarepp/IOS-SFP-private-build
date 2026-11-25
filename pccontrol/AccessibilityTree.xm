@@ -571,6 +571,7 @@ NSData *zxCopyAccessibilityVisible2095WithBudget(NSTimeInterval budget, NSError 
         __block pid_t pid = 0;
         __block NSDictionary *snapshot = nil;
         __block NSString *failureStage = @"not-started";
+        NSMutableDictionary *diagnostics = [NSMutableDictionary dictionary];
         void (^capture)(void) = ^{
             failureStage = @"foreground-pid";
             void *frontBoard = dlopen("/System/Library/PrivateFrameworks/AXFrontBoardUtils.framework/AXFrontBoardUtils", RTLD_LAZY);
@@ -586,10 +587,31 @@ NSData *zxCopyAccessibilityVisible2095WithBudget(NSTimeInterval budget, NSError 
                 if (!zxIsLivePID(pid) && (!app || [bundleID isEqualToString:@"com.apple.springboard"])) pid = getpid();
             }
             if (!zxIsLivePID(pid)) return;
-            failureStage = @"application-class";
+            failureStage = @"runtime-load";
+            dlerror();
             void *runtime = dlopen("/System/Library/PrivateFrameworks/AXRuntime.framework/AXRuntime", RTLD_NOW | RTLD_GLOBAL);
+            const char *runtimeError = runtime ? NULL : dlerror();
+            diagnostics[@"runtimeLoaded"] = @(runtime != NULL);
+            if (runtimeError) diagnostics[@"runtimeError"] = [NSString stringWithUTF8String:runtimeError];
+            Class beforeClass = NSClassFromString(@"AXUIElement");
+            diagnostics[@"classBeforeLibrary"] = @(beforeClass != Nil);
+            diagnostics[@"methodBeforeLibrary"] = @([beforeClass respondsToSelector:@selector(uiApplicationWithPid:)]);
+            dlerror();
+            void *library = dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW | RTLD_GLOBAL);
+            const char *libraryError = library ? NULL : dlerror();
+            diagnostics[@"accessibilityLibraryLoaded"] = @(library != NULL);
+            if (libraryError) diagnostics[@"accessibilityLibraryError"] = [NSString stringWithUTF8String:libraryError];
             Class elementClass = NSClassFromString(@"AXUIElement");
-            if (!runtime || !elementClass || ![elementClass respondsToSelector:@selector(uiApplicationWithPid:)]) return;
+            diagnostics[@"classFound"] = @(elementClass != Nil);
+            diagnostics[@"methodFound"] = @([elementClass respondsToSelector:@selector(uiApplicationWithPid:)]);
+            diagnostics[@"cCreateFound"] = @(dlsym(RTLD_DEFAULT, "AXUIElementCreateApplication") != NULL ||
+                dlsym(RTLD_DEFAULT, "_AXUIElementCreateAppElementWithPid") != NULL);
+            diagnostics[@"cCopyFound"] = @(dlsym(RTLD_DEFAULT, "AXUIElementCopyAttributeValue") != NULL);
+            if (!runtime) return;
+            failureStage = @"class-lookup";
+            if (!elementClass) return;
+            failureStage = @"application-method";
+            if (![elementClass respondsToSelector:@selector(uiApplicationWithPid:)]) return;
             ZXSetRequestingClient requestingClient = (ZXSetRequestingClient)dlsym(RTLD_DEFAULT, "__AXSetRequestingClient");
             ZXValueGet getValue = (ZXValueGet)dlsym(runtime, "AXValueGetValue");
             if (requestingClient) requestingClient(2);
@@ -623,13 +645,16 @@ NSData *zxCopyAccessibilityVisible2095WithBudget(NSTimeInterval budget, NSError 
             NSMutableDictionary *root = [@{@"role": @"AXApplication", @"source": @"application",
                                            @"snapshotPath": @"root", @"children": children} mutableCopy];
             snapshot = @{@"pid": @(pid), @"mode": @"visible2095", @"count": @(children.count + 1),
-                         @"candidateCount": @(children.count), @"sourceCounts": @{@"2095": @(visible.count), @"3015": count3015},
+                         @"candidateCount": @(children.count), @"diagnostics": diagnostics,
+                         @"sourceCounts": @{@"2095": @(visible.count), @"3015": count3015},
                          @"budgetMs": @(budget * 1000), @"limitReached": @(limitReached), @"root": root};
         };
         if ([NSThread isMainThread]) capture();
         else dispatch_sync(dispatch_get_main_queue(), capture);
         if (!snapshot) {
-            NSString *detail = [NSString stringWithFormat:@"AX 2095 capture failed: stage=%@ pid=%d", failureStage, pid];
+            NSData *diagnosticData = [NSJSONSerialization dataWithJSONObject:diagnostics options:NSJSONWritingSortedKeys error:nil];
+            NSString *diagnosticText = [[NSString alloc] initWithData:diagnosticData encoding:NSUTF8StringEncoding];
+            NSString *detail = [NSString stringWithFormat:@"AX 2095 capture failed: stage=%@ pid=%d diagnostics=%@", failureStage, pid, diagnosticText ?: @"{}"];
             NSLog(@"com.zjx.springboard: %@", detail);
             if (error) *error = [NSError errorWithDomain:@"ZXTouchAX" code:7
                                                 userInfo:@{NSLocalizedDescriptionKey: detail}];
