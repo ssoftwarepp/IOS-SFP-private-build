@@ -17,7 +17,8 @@ class MockDevice:
         self.events = []
         self.color_args = None
 
-    def get_element_tree(self):
+    def get_element_tree(self, *, mode="legacy", budget_ms=3000):
+        self.ax_request = (mode, budget_ms)
         return self.tree
 
     def get_screen_scale(self):
@@ -69,6 +70,15 @@ class AutomationHelpersTests(unittest.TestCase):
         self.assertIs(result["node"], second)
         with self.assertRaisesRegex(re.error, "unterminated character set"):
             locate_elements(tree, label="re:[")
+
+    def test_visible2095_mode_fetches_and_taps_its_own_tree(self):
+        node = {"source": "visible2095", "label": "继续", "role": "AXElement",
+                "frame": {"x": 10, "y": 20, "width": 40, "height": 20}, "children": []}
+        device = MockDevice({"mode": "visible2095", "root": {"role": "AXApplication", "children": [node]}})
+        with patch("zxtouch.automation.random.uniform", side_effect=[30.0, 30.0]):
+            result = tap_element(device, label="继续", mode="visible2095", budget_ms=12000)
+        self.assertEqual(device.ax_request, ("visible2095", 12000))
+        self.assertIs(result["node"], node)
 
     def test_rgb_tolerance_saturates(self):
         device = MockDevice({})

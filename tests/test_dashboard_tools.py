@@ -16,6 +16,7 @@ class DashboardToolsTests(unittest.TestCase):
         ])
         self.assertEqual(server.count("[owner requestIsAuthorized:request]"), len(routes))
         self.assertIn('request.query[@"budgetMs"]', server)
+        self.assertIn('request.query[@"mode"]', server)
         self.assertIn('framedSocketCommand:command mime:@"application/json"', server)
         advanced = (ROOT / "zxtouch/zxtouch/AdvancedTools.inc").read_text(encoding="utf-8")
         advanced_routes = re.findall(r'path:@"(/api/[^\"]+)"', advanced)
@@ -54,6 +55,10 @@ class DashboardToolsTests(unittest.TestCase):
             self.assertIn(endpoint, html)
         for endpoint in ('/api/image/templates', '/api/image/matches', '/api/ax/point', '/api/ocr'):
             self.assertIn(endpoint, html)
+        self.assertIn('id="axMode"', html)
+        self.assertIn('id="axBudget"', html)
+        self.assertIn('mode=${JSON.stringify(axSnapshotMode)}', html)
+        self.assertIn('/api/ax/tree?mode=${encodeURIComponent(mode)}&budgetMs=${budget}', html)
         for control in ('axOverlay', 'axImage', 'axCopyCode', 'axDownloadCode',
                         'standaloneTemplate', 'visionCrop', 'screenExport'):
             self.assertIn('id="{}"'.format(control), html)

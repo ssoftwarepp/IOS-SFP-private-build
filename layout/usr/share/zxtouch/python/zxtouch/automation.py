@@ -37,10 +37,10 @@ def locate_elements(tree, *, identifier=None, label=None, value=None, role=None,
 
 def tap_element(device, *, index=0, tree=None, identifier=None, label=None,
                 value=None, role=None, element_type=None, window_context_id=None,
-                delay=0.05, inset_pixels=2):
+                delay=0.05, inset_pixels=2, mode="legacy", budget_ms=3000):
     """Requery and tap an AX element center; zero-based index disambiguates duplicates."""
     if tree is None:
-        tree = device.get_element_tree()
+        tree = device.get_element_tree(mode=mode, budget_ms=budget_ms)
     matches = locate_elements(tree, identifier=identifier, label=label, value=value,
                               role=role, element_type=element_type,
                               window_context_id=window_context_id)

@@ -424,7 +424,14 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
         @autoreleasepool {
             if (!writeStreamRef) return;
             NSError *error = nil;
-            NSString *budgetText = [NSString stringWithUTF8String:(const char *)eventData];
+            NSString *options = [NSString stringWithUTF8String:(const char *)eventData];
+            NSArray<NSString *> *parts = [options componentsSeparatedByString:@";;"];
+            NSString *budgetText = parts.firstObject;
+            NSString *mode = parts.count > 1 ? parts[1] : @"legacy";
+            if (parts.count > 2 || ![@[@"legacy", @"visible2095"] containsObject:mode]) {
+                notifyClient((UInt8 *)"-1;;AX mode must be legacy or visible2095\r\n", writeStreamRef);
+                return;
+            }
             NSTimeInterval budget = 3.0;
             if (budgetText.length) {
                 NSScanner *scanner = [NSScanner scannerWithString:budgetText];
@@ -435,7 +442,9 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
                 }
                 budget = milliseconds / 1000.0;
             }
-            NSData *treeData = zxCopyAccessibilityTreeWithBudget(budget, &error);
+            NSData *treeData = [mode isEqualToString:@"visible2095"] ?
+                zxCopyAccessibilityVisible2095WithBudget(budget, &error) :
+                zxCopyAccessibilityTreeWithBudget(budget, &error);
             if (!treeData) {
                 NSLog(@"com.zjx.springboard: AX hierarchy failed: %@", error);
                 NSString *detail = error ? [NSString stringWithFormat:@"%@: %ld: %@",

@@ -16,7 +16,10 @@
         NSInteger budgetMs = 0;
         if (![scanner scanInteger:&budgetMs] || !scanner.isAtEnd || budgetMs < 100 || budgetMs > 30000)
             return [owner jsonResponse:@{ @"ok": @NO, @"error": @"budgetMs 必须为 100 到 30000 的整数" } status:400];
-        NSString *command = [NSString stringWithFormat:@"32%ld", (long)budgetMs];
+        NSString *mode = [request.query[@"mode"] isKindOfClass:[NSString class]] ? request.query[@"mode"] : @"legacy";
+        if (![@[@"legacy", @"visible2095"] containsObject:mode])
+            return [owner jsonResponse:@{ @"ok": @NO, @"error": @"mode 必须为 legacy 或 visible2095" } status:400];
+        NSString *command = [NSString stringWithFormat:@"32%ld;;%@", (long)budgetMs, mode];
         NSData *data = [owner framedSocketCommand:command mime:@"application/json" error:&error];
         if (!data) return [owner jsonResponse:@{ @"ok": @NO, @"error": error ?: @"元素查询失败" } status:502];
         NSDictionary *tree = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];

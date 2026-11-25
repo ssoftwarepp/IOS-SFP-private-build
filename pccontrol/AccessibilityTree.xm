@@ -7,6 +7,12 @@
 #import <signal.h>
 #import <errno.h>
 
+@protocol ZXVisibleAXElement <NSObject>
++ (id)uiApplicationWithPid:(int)pid;
+- (id)objectWithAXAttribute:(long)attribute;
+- (NSArray *)uiElementsWithAttribute:(long)attribute;
+@end
+
 // iOS AXRuntime exports are resolved at runtime so the tweak does not link
 // against an SDK that lacks private accessibility headers.
 typedef CFTypeRef (*ZXCreateApplication)(pid_t);
@@ -502,9 +508,126 @@ NSData *zxCopyAccessibilityTreeWithBudget(NSTimeInterval budget, NSError **error
     return [NSJSONSerialization dataWithJSONObject:@{@"pid": @(pid), @"count": @(count),
                                                      @"candidateCount": @(candidateCount),
                                                      @"sourceCounts": sourceCounts ?: @{},
+                                                     @"mode": @"legacy",
                                                      @"budgetMs": @(budget * 1000),
                                                      @"limitReached": @(limitReached),
                                                      @"root": tree} options:0 error:error];
+    }
+}
+
+static NSString *zxVisibleString(id element, long attribute)
+{
+    id value = [element objectWithAXAttribute:attribute];
+    if ([value isKindOfClass:[NSAttributedString class]]) return [value string];
+    return [value isKindOfClass:[NSString class]] ? value : nil;
+}
+
+static NSDictionary *zxVisible2095Node(id element, NSUInteger index, ZXValueGet getValue)
+{
+    CFTypeRef rawFrame = (__bridge CFTypeRef)[element objectWithAXAttribute:2003];
+    CGRect frame = CGRectZero;
+    if (!rawFrame || !getValue || !getValue(rawFrame, 3, &frame) ||
+        !isfinite(frame.origin.x) || !isfinite(frame.origin.y) ||
+        !isfinite(frame.size.width) || !isfinite(frame.size.height)) return nil;
+    CGPoint activation = CGPointMake(CGRectGetMidX(frame), CGRectGetMidY(frame));
+    CFTypeRef rawPoint = (__bridge CFTypeRef)[element objectWithAXAttribute:2007];
+    CGPoint point = CGPointZero;
+    if (rawPoint && getValue(rawPoint, 1, &point) && isfinite(point.x) && isfinite(point.y) && point.x < 100000)
+        activation = point;
+    id rawTraits = [element objectWithAXAttribute:2004];
+    uint64_t bits = [rawTraits respondsToSelector:@selector(unsignedLongLongValue)] ? [rawTraits unsignedLongLongValue] : 0;
+    NSMutableArray *traits = [NSMutableArray array];
+    NSArray *names = @[@"button", @"link", @"image", @"selected", @"playsSound", @"keyboardKey", @"staticText", @"summaryElement", @"notEnabled", @"updatesFrequently", @"searchField", @"startsMediaSession", @"adjustable", @"allowsDirectInteraction", @"causesPageTurn", @"", @"header"];
+    for (NSUInteger bit = 0; bit < names.count; ++bit)
+        if ((bits & (1ULL << bit)) && [names[bit] length]) [traits addObject:names[bit]];
+    NSMutableDictionary *node = [@{@"id": [NSString stringWithFormat:@"n%lu", (unsigned long)index],
+                                   @"role": @"AXElement", @"source": @"visible2095", @"candidateAttribute": @2095,
+                                   @"candidateIndex": @(index), @"traits": traits,
+                                   @"enabled": @((bits & (1ULL << 8)) == 0),
+                                   @"frame": @{@"x": @(frame.origin.x), @"y": @(frame.origin.y),
+                                               @"width": @(frame.size.width), @"height": @(frame.size.height)},
+                                   @"activationPoint": @{@"x": @(activation.x), @"y": @(activation.y)},
+                                   @"children": @[]} mutableCopy];
+    NSString *label = zxVisibleString(element, 2001);
+    NSString *value = zxVisibleString(element, 2006);
+    NSString *hint = zxVisibleString(element, 2002);
+    if (label.length) node[@"label"] = label;
+    if (value.length) node[@"value"] = value;
+    if (hint.length) node[@"hint"] = hint;
+    return node;
+}
+
+NSData *zxCopyAccessibilityVisible2095WithBudget(NSTimeInterval budget, NSError **error)
+{
+    if (!isfinite(budget) || budget < 0.1 || budget > 30.0) {
+        if (error) *error = [NSError errorWithDomain:@"ZXTouchAX" code:6
+                                            userInfo:@{NSLocalizedDescriptionKey: @"AX budget must be 100 to 30000 milliseconds"}];
+        return nil;
+    }
+    static NSObject *visibleLock;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{ visibleLock = [NSObject new]; });
+    @synchronized (visibleLock) {
+        __block pid_t pid = 0;
+        __block NSDictionary *snapshot = nil;
+        void (^capture)(void) = ^{
+            void *frontBoard = dlopen("/System/Library/PrivateFrameworks/AXFrontBoardUtils.framework/AXFrontBoardUtils", RTLD_LAZY);
+            ZXFocusedPID focusedPID = frontBoard ? (ZXFocusedPID)dlsym(frontBoard, "AXFrontBoardFocusedAppPID") : NULL;
+            pid = focusedPID ? focusedPID() : 0;
+            if (!zxIsLivePID(pid)) {
+                id app = getFrontMostApplication();
+                pid = zxPIDFromObject(app);
+                if (!pid && [app respondsToSelector:@selector(processState)])
+                    pid = zxPIDFromObject(((id (*)(id, SEL))objc_msgSend)(app, @selector(processState)));
+                NSString *bundleID = [app respondsToSelector:@selector(bundleIdentifier)] ?
+                    ((id (*)(id, SEL))objc_msgSend)(app, @selector(bundleIdentifier)) : nil;
+                if (!zxIsLivePID(pid) && (!app || [bundleID isEqualToString:@"com.apple.springboard"])) pid = getpid();
+            }
+            if (!zxIsLivePID(pid)) return;
+            dlopen("/System/Library/PrivateFrameworks/AXRuntime.framework/AXRuntime", RTLD_NOW | RTLD_GLOBAL);
+            Class elementClass = NSClassFromString(@"AXUIElement");
+            if (!elementClass || ![elementClass respondsToSelector:@selector(uiApplicationWithPid:)]) return;
+            ZXSetRequestingClient requestingClient = (ZXSetRequestingClient)dlsym(RTLD_DEFAULT, "__AXSetRequestingClient");
+            ZXValueGet getValue = (ZXValueGet)dlsym(RTLD_DEFAULT, "AXValueGetValue");
+            if (requestingClient) requestingClient(2);
+            if (!getValue) return;
+            id application = [(id<ZXVisibleAXElement>)elementClass uiApplicationWithPid:pid];
+            if (!application) return;
+            ZXSetTimeout setTimeout = (ZXSetTimeout)dlsym(RTLD_DEFAULT, "AXUIElementSetMessagingTimeout");
+            if (setTimeout) setTimeout((__bridge CFTypeRef)application, 0.5f);
+            CFAbsoluteTime deadline = CFAbsoluteTimeGetCurrent() + budget;
+            NSArray *visible = [application uiElementsWithAttribute:2095];
+            if (![visible isKindOfClass:[NSArray class]]) return;
+            id list3015 = [application uiElementsWithAttribute:3015];
+            id count3015 = [list3015 isKindOfClass:[NSArray class]] ? @([list3015 count]) : [NSNull null];
+            NSMutableArray *children = [NSMutableArray array];
+            BOOL limitReached = CFAbsoluteTimeGetCurrent() >= deadline;
+            NSUInteger index = 0;
+            for (id element in visible) {
+                if (index >= zxMaxCandidates || CFAbsoluteTimeGetCurrent() >= deadline) {
+                    limitReached = YES;
+                    break;
+                }
+                @autoreleasepool {
+                    NSDictionary *node = zxVisible2095Node(element, index, getValue);
+                    if (node) [children addObject:node];
+                }
+                ++index;
+            }
+            NSMutableDictionary *root = [@{@"role": @"AXApplication", @"source": @"application",
+                                           @"snapshotPath": @"root", @"children": children} mutableCopy];
+            snapshot = @{@"pid": @(pid), @"mode": @"visible2095", @"count": @(children.count + 1),
+                         @"candidateCount": @(children.count), @"sourceCounts": @{@"2095": @(visible.count), @"3015": count3015},
+                         @"budgetMs": @(budget * 1000), @"limitReached": @(limitReached), @"root": root};
+        };
+        if ([NSThread isMainThread]) capture();
+        else dispatch_sync(dispatch_get_main_queue(), capture);
+        if (!snapshot) {
+            if (error) *error = [NSError errorWithDomain:@"ZXTouchAX" code:7
+                                                userInfo:@{NSLocalizedDescriptionKey: @"AX 2095 visible elements unavailable"}];
+            return nil;
+        }
+        return [NSJSONSerialization dataWithJSONObject:snapshot options:0 error:error];
     }
 }
 

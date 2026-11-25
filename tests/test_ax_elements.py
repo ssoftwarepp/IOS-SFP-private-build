@@ -213,7 +213,7 @@ class AXProtocolTests(unittest.TestCase):
         self.assertEqual(len(found), 1)
         self.assertEqual(found[0]["label"], "通用")
         self.assertEqual(device.s.sent, [datahandler.format_socket_data(
-            tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 3000)])
+            tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 3000, "legacy")])
 
     def test_hierarchy_budget_request_and_validation(self):
         tree = {"pid": 123, "count": 2, "candidateCount": 1,
@@ -222,10 +222,34 @@ class AXProtocolTests(unittest.TestCase):
         device = make_device([framed_response(tree)])
         self.assertEqual(device.get_element_tree(timeout=15, budget_ms=12000), tree)
         self.assertEqual(device.s.sent, [datahandler.format_socket_data(
-            tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 12000)])
+            tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 12000, "legacy")])
         for invalid in (0, 99, 30001, 3.0, "3000", True):
             with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                 device.get_element_tree(budget_ms=invalid)
+
+    def test_visible2095_is_an_independent_snapshot_mode(self):
+        tree = {"pid": 123, "mode": "visible2095", "sourceCounts": {"2095": 2},
+                "count": 3, "candidateCount": 2, "limitReached": False,
+                "root": {"role": "AXApplication", "children": [
+                    {"id": "n0", "label": "按钮", "source": "visible2095", "candidateIndex": 0,
+                     "candidateAttribute": 2095, "frame": {"x": 2, "y": 3, "width": 40, "height": 40},
+                     "children": []}]}}
+        device = make_device([framed_response(tree)])
+        self.assertEqual(device.find_tree_elements(label="按钮", mode="visible2095", budget_ms=12000),
+                         tree["root"]["children"])
+        self.assertEqual(device.s.sent, [datahandler.format_socket_data(
+            tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 12000, "visible2095")])
+        with self.assertRaisesRegex(ValueError, "mode"):
+            device.get_element_tree(mode="invalid")
+        source = (Path(__file__).resolve().parent.parent / "pccontrol" /
+                  "AccessibilityTree.xm").read_text(encoding="utf-8")
+        self.assertIn('uiElementsWithAttribute:2095', source)
+        self.assertIn('objectWithAXAttribute:2003', source)
+        self.assertIn('@"source": @"visible2095"', source)
+        self.assertIn('zxCopyAccessibilityVisible2095WithBudget', source)
+        task = (Path(__file__).resolve().parent.parent / "pccontrol" /
+                "Task.xm").read_text(encoding="utf-8")
+        self.assertIn('zxCopyAccessibilityVisible2095WithBudget(budget, &error)', task)
 
     def test_hierarchy_source_counts_and_budget_are_exposed(self):
         source = (Path(__file__).resolve().parent.parent / "pccontrol" /
@@ -311,7 +335,7 @@ class AXProtocolTests(unittest.TestCase):
         self.assertEqual(len(device.find_tree_elements(role="AXButton", timeout=2)), 1)
         with patch.object(device, "get_element_tree", return_value={"root": {"role": "AXButton", "children": []}}) as get_tree:
             self.assertEqual(len(device.find_tree_elements(role="AXButton", budget_ms=12000)), 1)
-            get_tree.assert_called_once_with(timeout=None, budget_ms=12000)
+            get_tree.assert_called_once_with(timeout=None, budget_ms=12000, mode="legacy")
         with patch.object(device, "get_ui_elements", return_value={"elements": []}) as get_ui:
             self.assertEqual(device.find_elements(text="missing", timeout=3), [])
             get_ui.assert_called_once_with(timeout=3)
