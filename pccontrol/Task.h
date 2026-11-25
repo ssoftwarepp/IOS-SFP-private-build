@@ -37,6 +37,8 @@
 #define TASK_CLEAR_APP_DATA 44
 #define TASK_GET_FOREGROUND_PROCESS_NAME 45
 #define TASK_SET_CLIPBOARD_TEXT 46
+#define TASK_INPUT_TEXT 47
+#define TASK_PRESS_KEY 48
 
 
 // Used only by zxtouch-runner on its own connection. See Runner.h.

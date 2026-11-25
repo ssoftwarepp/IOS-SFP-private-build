@@ -1,6 +1,7 @@
 #include "Task.h"
 #include <roothide.h>
 #include "Touch.h"
+#include <mach/mach_time.h>
 #include "ColorPicker.h"
 #include "ScreenMatch.h"
 #include "Process.h"
@@ -60,6 +61,44 @@ static NSString *zxBundleIDFromRequest(UInt8 *data) {
         [identifier rangeOfCharacterFromSet:NSCharacterSet.controlCharacterSet].location != NSNotFound)
         return nil;
     return identifier;
+}
+
+static BOOL zxSendKeyEvent(IOHIDEventSystemClientRef client, uint16_t page, uint16_t usage, BOOL down) {
+    IOHIDEventRef event = IOHIDEventCreateKeyboardEvent(kCFAllocatorDefault, mach_absolute_time(),
+                                                        page, usage, down, 0);
+    if (!event) return NO;
+    IOHIDEventSetIntegerValue(event, 4, 1);
+    IOHIDEventSetSenderID(event, 0x8000000817319372ULL);
+    IOHIDEventSystemClientDispatchEvent(client, event);
+    CFRelease(event);
+    return YES;
+}
+
+static BOOL zxPressKey(NSString *key, NSUInteger durationMs) {
+    static dispatch_queue_t keyQueue;
+    static IOHIDEventSystemClientRef hidClient;
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        keyQueue = dispatch_queue_create("com.zjx.zxtouch.keys", DISPATCH_QUEUE_SERIAL);
+        hidClient = IOHIDEventSystemClientCreate(kCFAllocatorDefault);
+    });
+    NSDictionary<NSString *, NSNumber *> *keys = @{
+        @"enter": @40, @"return": @40, @"tab": @43, @"delete": @76, @"del": @76,
+        @"backspace": @42, @"space": @44, @"up": @82, @"down": @81,
+        @"left": @80, @"right": @79, @"home": @64, @"power": @48
+    };
+    NSString *name = key.lowercaseString;
+    NSNumber *usage = keys[name];
+    if (!usage || !hidClient) return NO;
+    uint16_t page = ([name isEqualToString:@"home"] || [name isEqualToString:@"power"]) ? 0x0c : 0x07;
+    __block BOOL success = NO;
+    dispatch_sync(keyQueue, ^{
+        BOOL pressed = zxSendKeyEvent(hidClient, page, usage.unsignedShortValue, YES);
+        if (pressed) usleep((useconds_t)(durationMs * 1000));
+        BOOL released = pressed && zxSendKeyEvent(hidClient, page, usage.unsignedShortValue, NO);
+        success = pressed && released;
+    });
+    return success;
 }
 
 static void zxReplyError(NSError *error, CFWriteStreamRef stream) {
@@ -602,6 +641,30 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
         void (^writeClipboard)(void) = ^{ UIPasteboard.generalPasteboard.string = text; };
         if (!zxAccessPasteboard(writeClipboard))
             notifyClient((UInt8 *)"-1;;Clipboard write timed out\r\n", writeStreamRef);
+        else notifyClient((UInt8 *)"0\r\n", writeStreamRef);
+    }
+    else if (taskType == TASK_INPUT_TEXT)
+    {
+        NSData *decoded = [[NSData alloc] initWithBase64EncodedString:
+            [NSString stringWithUTF8String:(const char *)eventData] options:0];
+        NSString *text = decoded ? [[NSString alloc] initWithData:decoded encoding:NSUTF8StringEncoding] : nil;
+        if (!text) {
+            notifyClient((UInt8 *)"-1;;Invalid input text\r\n", writeStreamRef);
+        } else {
+            [[NSDistributedNotificationCenter defaultCenter]
+                postNotificationName:@"com.zjx.zxtouch.keyboardcontrol" object:nil
+                userInfo:@{@"task_id": @"1", @"task_content": text} deliverImmediately:NO];
+            notifyClient((UInt8 *)"0\r\n", writeStreamRef);
+        }
+    }
+    else if (taskType == TASK_PRESS_KEY)
+    {
+        NSString *request = [NSString stringWithUTF8String:(const char *)eventData];
+        NSArray<NSString *> *parts = [request componentsSeparatedByString:@";;"];
+        NSInteger duration = parts.count == 2 ? [parts[1] integerValue] : 50;
+        NSString *key = parts.firstObject.lowercaseString;
+        if (parts.count > 2 || duration < 1 || duration > 5000 || !zxPressKey(key, (NSUInteger)duration))
+            notifyClient((UInt8 *)"-1;;Invalid key or HID dispatch failed\r\n", writeStreamRef);
         else notifyClient((UInt8 *)"0\r\n", writeStreamRef);
     }
     else if (taskType == TASK_CLEAR_APP_DATA)

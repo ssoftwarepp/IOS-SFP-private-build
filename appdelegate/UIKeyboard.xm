@@ -67,7 +67,7 @@
 	}
 
 	- (void)dealloc {
-        [[NSDistributedNotificationCenter defaultCenter] removeObserver:self name:@"com.zjx.zxtouch.textinput" object:nil];
+        [[NSDistributedNotificationCenter defaultCenter] removeObserver:self name:@"com.zjx.zxtouch.keyboardcontrol" object:nil];
 		//NSLog(@"com.zjx.appdelegate: UIKeyboardImpl instance deallocated");
 		return %orig;
 	}

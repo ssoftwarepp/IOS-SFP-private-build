@@ -378,6 +378,57 @@ class zxtouch:
         self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_SET_CLIPBOARD_TEXT, payload))
         return self._recv_response()
 
+    def input_text(self, text):
+        """Insert Unicode text into the focused field in one request."""
+        import base64
+        if not isinstance(text, str):
+            raise TypeError("text must be str")
+        payload = base64.b64encode(text.encode("utf-8")).decode("ascii")
+        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_INPUT_TEXT, payload))
+        return self._recv_response()
+
+    def type_text(self, text, delay_ms=50):
+        """Send text one character at a time, with a delay in milliseconds."""
+        if not isinstance(text, str):
+            raise TypeError("text must be str")
+        if isinstance(delay_ms, bool) or not isinstance(delay_ms, (int, float)) or not math.isfinite(delay_ms) or delay_ms < 0:
+            raise ValueError("delay_ms must be a nonnegative finite number")
+        for char in text.replace("\r\n", "\n"):
+            if char == "\n" or char == "\r":
+                self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_PRESS_KEY, "enter", 50))
+            else:
+                self.s.sendall(datahandler.format_socket_data(
+                    tasktypes.TASK_KEYBOARDIMPL, kbdtasktypes.KEYBOARD_INSERT_TEXT, char))
+            result = self._recv_response()
+            if not result[0]:
+                return result
+            if delay_ms:
+                time.sleep(delay_ms / 1000)
+        return True, ""
+
+    def press_key(self, key):
+        """Press enter, tab, delete, backspace, space or an arrow key."""
+        if not isinstance(key, str) or key.lower() not in (
+            "enter", "return", "tab", "delete", "del", "backspace", "space",
+            "up", "down", "left", "right"):
+            raise ValueError("unsupported key")
+        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_PRESS_KEY, key.lower(), 50))
+        return self._recv_response()
+
+    def press_home(self, duration=100):
+        """Press and release the Home button (duration in milliseconds)."""
+        return self._press_button("home", duration)
+
+    def press_power(self, duration=100):
+        """Press and release the Power button (duration in milliseconds)."""
+        return self._press_button("power", duration)
+
+    def _press_button(self, button, duration):
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(duration) or duration < 1 or duration > 5000:
+            raise ValueError("duration must be between 1 and 5000 milliseconds")
+        self.s.sendall(datahandler.format_socket_data(tasktypes.TASK_PRESS_KEY, button, int(duration)))
+        return self._recv_response()
+
     def insert_text(self, text):
         """Insert text into the text field
 
