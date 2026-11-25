@@ -1,4 +1,5 @@
 import io
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -51,6 +52,23 @@ class AutomationHelpersTests(unittest.TestCase):
         ]])
         with self.assertRaises(LookupError):
             tap_element(device, label="missing")
+
+    def test_label_regex_locates_and_taps_matching_node(self):
+        first = {"role": "AXButton", "label": "确认订单 123", "children": [],
+                 "frame": {"x": 10, "y": 20, "width": 40, "height": 20}}
+        second = {"role": "AXButton", "label": "确认订单 456", "children": [],
+                  "frame": {"x": 10, "y": 20, "width": 40, "height": 20}}
+        tree = {"root": {"role": "AXApplication", "children": [
+            first, {"role": "AXButton", "children": []}, second]}}
+        self.assertEqual(locate_elements(tree, label="确认订单 123"), [first])
+        self.assertEqual(locate_elements(tree, label=r"re:^确认订单 \d+$", role="AXButton"),
+                         [first, second])
+        self.assertEqual(locate_elements(tree, label=r"re:^未找到 \d+$"), [])
+        with patch("zxtouch.automation.random.uniform", side_effect=[30.0, 30.0]):
+            result = tap_element(MockDevice(tree), label=r"re:^确认订单 \d+$", index=1)
+        self.assertIs(result["node"], second)
+        with self.assertRaisesRegex(re.error, "unterminated character set"):
+            locate_elements(tree, label="re:[")
 
     def test_rgb_tolerance_saturates(self):
         device = MockDevice({})

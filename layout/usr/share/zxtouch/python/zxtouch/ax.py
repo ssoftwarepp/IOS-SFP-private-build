@@ -1,6 +1,15 @@
 """Decode native iOS accessibility snapshots returned by ios-mcp."""
 
 import json
+import re
+
+
+def label_matches(actual, expected):
+    if expected is None:
+        return True
+    if isinstance(expected, str) and expected.startswith("re:"):
+        return isinstance(actual, str) and re.search(expected[3:], actual) is not None
+    return actual == expected
 
 
 def decode_mcp_elements(data):
@@ -27,14 +36,14 @@ def decode_mcp_elements(data):
 def find_tree_elements(tree, *, identifier=None, label=None, value=None, role=None):
     """Find matching nodes in preorder without modifying the AX snapshot."""
     root = tree["root"] if "root" in tree else tree
-    filters = {"identifier": identifier, "label": label,
-               "value": value, "role": role}
+    filters = {"identifier": identifier, "value": value, "role": role}
     matches = []
     pending = [root]
     while pending:
         node = pending.pop()
-        if all(expected is None or node.get(key) == expected
-               for key, expected in filters.items()):
+        if label_matches(node.get("label"), label) and all(
+                expected is None or node.get(key) == expected
+                for key, expected in filters.items()):
             matches.append(node)
         pending.extend(reversed(node.get("children", [])))
     return matches

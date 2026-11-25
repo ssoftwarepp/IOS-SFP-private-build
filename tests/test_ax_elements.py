@@ -215,6 +215,19 @@ class AXProtocolTests(unittest.TestCase):
         self.assertEqual(device.s.sent, [datahandler.format_socket_data(
             tasktypes.TASK_ACCESSIBILITY_HIERARCHY)])
 
+    def test_hierarchy_label_regex_keeps_other_filters_exact(self):
+        tree = {"root": {"role": "AXApplication", "children": [
+            {"role": "AXButton", "label": "下一步 1", "identifier": "next", "children": []},
+            {"role": "AXStaticText", "label": "下一步 2", "identifier": "next", "children": []},
+            {"role": "AXButton", "label": "下一步 3", "identifier": "other", "children": []},
+            {"role": "AXButton", "children": []}]}}
+        device = make_device([])
+        matches = device.find_tree_elements(label=r"re:^下一步 \d+$", identifier="next",
+                                            role="AXButton", tree=tree)
+        self.assertEqual([node["label"] for node in matches], ["下一步 1"])
+        self.assertEqual(device.find_tree_elements(label="下一步 1", tree=tree), matches)
+        self.assertEqual(device.find_tree_elements(label="下一步", tree=tree), [])
+
     def test_hierarchy_2000_nodes_fragmented_response_preserves_next_packet(self):
         nodes = [{"role": "AXElement", "label": "相同标签", "frame": {"x": i, "y": 1, "width": 20, "height": 20},
                   "children": []} for i in range(2000)]

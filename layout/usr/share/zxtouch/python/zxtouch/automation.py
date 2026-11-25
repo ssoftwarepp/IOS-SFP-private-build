@@ -8,6 +8,8 @@ import random
 import time
 from pathlib import Path
 
+from zxtouch.ax import label_matches
+
 
 def _rect(node):
     frame = node.get("frame") or {}
@@ -22,12 +24,12 @@ def locate_elements(tree, *, identifier=None, label=None, value=None, role=None,
     """Find AX nodes in preorder; repeated labels remain distinct results."""
     pending = [tree.get("root", tree)]
     matches = []
-    expected = {"identifier": identifier, "label": label, "value": value,
-                "role": role, "elementType": element_type,
-                "windowContextId": window_context_id}
+    expected = {"identifier": identifier, "value": value, "role": role,
+                "elementType": element_type, "windowContextId": window_context_id}
     while pending:
         node = pending.pop()
-        if all(want is None or node.get(key) == want for key, want in expected.items()):
+        if label_matches(node.get("label"), label) and all(
+                want is None or node.get(key) == want for key, want in expected.items()):
             matches.append(node)
         pending.extend(reversed(node.get("children") or []))
     return matches
