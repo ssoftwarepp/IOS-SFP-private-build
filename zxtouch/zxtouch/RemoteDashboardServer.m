@@ -239,7 +239,7 @@ static NSString *ZXDashboardIPAddress(void)
     }
     NSMutableData *header = [NSMutableData data];
     char c = 0;
-    while (header.length < 512) {
+    while (header.length < 65536) {
         ssize_t received = recv(fd, &c, 1, 0);
         if (received < 0 && errno == EINTR) continue;
         if (received != 1) break;

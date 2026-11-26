@@ -241,33 +241,55 @@ class AXProtocolTests(unittest.TestCase):
             tasktypes.TASK_ACCESSIBILITY_HIERARCHY, 12000, "visible2095")])
         with self.assertRaisesRegex(ValueError, "mode"):
             device.get_element_tree(mode="invalid")
-        source = (Path(__file__).resolve().parent.parent / "pccontrol" /
-                  "AccessibilityTree.xm").read_text(encoding="utf-8")
-        self.assertIn('uiElementsWithAttribute:2095', source)
-        self.assertIn('objectWithAXAttribute:2003', source)
-        self.assertIn('@"source": @"visible2095"', source)
-        self.assertIn('zxCopyAccessibilityVisible2095WithBudget', source)
+        root = Path(__file__).resolve().parent.parent / "pccontrol"
+        source = (root / "AccessibilityTree.xm").read_text(encoding="utf-8")
+        visible = (root / "Visible2095Capture.inc").read_text(encoding="utf-8")
+        self.assertIn('#include "Visible2095Capture.inc"', source)
+        self.assertIn('AXUIElementCopyAttributeValue', visible)
+        self.assertIn('AXUIElementCreateApplication', visible)
+        self.assertIn('@"source": @"visible2095"', visible)
+        self.assertNotIn('uiElementsWithAttribute:', visible)
+        self.assertNotIn('objectWithAXAttribute:', visible)
+        self.assertIn('zxCopyAccessibilityVisible2095WithBudget', visible)
         task = (Path(__file__).resolve().parent.parent / "pccontrol" /
                 "Task.xm").read_text(encoding="utf-8")
         self.assertIn('zxCopyAccessibilityVisible2095WithBudget(budget, &error)', task)
 
     def test_visible2095_failure_reports_capture_stage(self):
-        source = (Path(__file__).resolve().parent.parent / "pccontrol" /
-                  "AccessibilityTree.xm").read_text(encoding="utf-8")
-        for stage in ("foreground-pid", "runtime-load", "class-lookup",
-                      "application-method", "ax-value-symbol", "application-element", "visible-list"):
-            self.assertIn('failureStage = @"' + stage + '";', source)
-        self.assertIn('AX 2095 capture failed: stage=%@ pid=%d diagnostics=%@', source)
-        for field in ('runtimeLoaded', 'classBeforeLibrary', 'methodBeforeLibrary',
-                      'accessibilityLibraryLoaded', 'classFound', 'methodFound',
-                      'cCreateFound', 'cCopyFound'):
-            self.assertIn('diagnostics[@"' + field + '"]', source)
-        self.assertIn('dlopen("/usr/lib/libAccessibility.dylib", RTLD_NOW | RTLD_GLOBAL)', source)
-        self.assertIn('dlsym(runtime, "AXValueGetValue")', source)
-        self.assertIn('if (![visible isKindOfClass:[NSArray class]]) return;', source)
-        device = make_device([b'-1;;ZXTouchAX: 7: AX 2095 capture failed: stage=visible-list pid=33256\r\n'])
-        with self.assertRaisesRegex(RuntimeError, 'stage=visible-list pid=33256'):
+        root = Path(__file__).resolve().parent.parent
+        visible = (root / "pccontrol" / "Visible2095Capture.inc").read_text(encoding="utf-8")
+        docs = (root / "AX_VISIBLE2095_DIAGNOSTICS.md").read_text(encoding="utf-8")
+        for stage in ("budget-validate", "foreground-pid", "runtime-load", "symbol-create",
+                      "symbol-copy", "application-create", "visible-copy-2095", "visible-type-2095",
+                      "node-frame-copy", "node-frame-type", "node-frame-decode", "node-build",
+                      "json-serialize"):
+            with self.subTest(stage=stage):
+                self.assertIn('@"' + stage + '"', visible)
+                self.assertIn('`' + stage + '`', docs)
+        for code in (100, 101, 102, 103, 104, 105, 106, 107, 108, 110, 111, 112, 120,
+                     121, 122, 123, 124, 130, 140, 190, 201, 202, 203, 204, 205,
+                     210, 211, 212, 220, 221, 222, 223, 224, 230, 231):
+            with self.subTest(error_code=code):
+                self.assertIn('| {} |'.format(code), docs)
+        self.assertIn('AX 2095 capture failed: stage=%@ errorCode=%ld pid=%d', visible)
+        self.assertIn('@"schemaVersion": @2', visible)
+        self.assertIn('@"attributeStats"', visible)
+        self.assertIn('dlclose(handle.pointerValue)', visible)
+        self.assertNotIn('@synchronized (visibleLock)', visible)
+        self.assertIn('zxVisibleWithinBudget(capture)', visible)
+        self.assertIn('AX 2095 capture failed: stage=%@ errorCode=%ld pid=%d', visible)
+        detail = ('ZXTouchAX: 121: AX 2095 capture failed: stage=node-frame-copy errorCode=121 '
+                  'pid=33256 axStatus=-25204 attribute=2003 nodeIndex=4 diagnostics={"schemaVersion":2,"stage":"node-frame-copy"}')
+        device = make_device([b'-1;;' + detail.encode('utf-8') + b'\r\n'])
+        with self.assertRaisesRegex(RuntimeError, 'stage=node-frame-copy errorCode=121.*nodeIndex=4'):
             device.get_element_tree(mode="visible2095")
+        tree = {"pid": 123, "mode": "visible2095", "backend": "c-ax", "count": 1,
+                "candidateCount": 0, "sourceCounts": {"2095": 0, "3015": None},
+                "budgetMs": 12000, "limitReached": False,
+                "diagnostics": {"schemaVersion": 2, "stage": "complete", "issuesTotal": 0},
+                "root": {"role": "AXApplication", "children": []}}
+        device = make_device([framed_response(tree)])
+        self.assertEqual(device.get_element_tree(mode="visible2095", budget_ms=12000), tree)
 
     def test_hierarchy_source_counts_and_budget_are_exposed(self):
         source = (Path(__file__).resolve().parent.parent / "pccontrol" /

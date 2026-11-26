@@ -77,7 +77,7 @@
 
 ### `GET /api/ax/tree`、`POST /api/ax/point`、`POST /api/ax/tap`
 
-- `/api/ax/tree` 无其他参数。成功 `{"ok":true,"tree":{...}}`；`tree` 有 `pid`（number，前台进程 ID）、`count`（number，节点数）、`candidateCount`（number，额外候选计数）、`limitReached`（boolean，采集触及上限）、`root`（AX 节点）。底层失败/缺失 root 为 HTTP 502。
+- `/api/ax/tree` 参数：`mode` 可选 `legacy` / `visible2095`，默认 `legacy`；`budgetMs` 可选整数 100..30000，默认 3000。成功 `{"ok":true,"tree":{...}}`；`tree` 有 `pid`（number，前台进程 ID）、`mode`、`backend`、`count`（number，节点数）、`candidateCount`（number，实际返回的 2095 节点数）、`sourceCounts`（2095 原始数组长度及 3015 原始数组长度；无法读取时为 null）、`limitReached`（boolean，采集触及预算或 2000 候选上限）、`diagnostics`（阶段、符号、属性统计、问题样本）、`root`（AX 节点）。底层失败/缺失 root 为 HTTP 502；错误文本包含 `ZXTouchAX` 错误码、`stage`、PID、属性 ID、节点索引和 JSON diagnostics。
 - AX 节点常见字段：`role`（角色字符串）、`children`（子节点数组）、`frame`（`{x,y,width,height}`，逻辑点）、`identifier`、`label`、`value`、`elementType`、`windowContextId`、`source`、`snapshotPath`；除节点结构外具体属性由可用性决定，并非每个节点都有。树结合真实子节点和窗口/数字候选集合，`role:"AXCandidateGroup"` 的分组并不表示纯粹的递归 `AXChildren` 关系。源：`AccessibilityTree.xm:76-168,274-337,481-484`。
 - `/api/ax/point` JSON：`x`,`y` 均必填有限 number，范围 0..10000（含边界），单位为屏幕**逻辑点**。成功 `{"ok":true,"result":{"pid":number,"x":number,"y":number,"element":AX节点}}`；无命中或底层失败 HTTP 502，格式错误 400。源：`AdvancedTools.inc:1-17`。
 - `/api/ax/tap` JSON：`x`,`y` 必填有限 number、范围 `[0,10000)`，单位逻辑点；`jitter` 可选 number/boolean，默认 false；`minDelayMs` 可选 number，默认 0；`maxDelayMs` 可选 number，默认 `minDelayMs`。两项延时均须有限且满足 `0<=minDelayMs<=maxDelayMs<=2000`（毫秒）。`jitter=false` 时仍校验延时，但实际传入 0。命中点先乘 `screenScale` 再发触摸。成功 `{"ok":true,"x":原输入,"y":原输入}`；输入 HTTP 400，触摸失败 502。源：`DashboardTools.inc:23-52`。

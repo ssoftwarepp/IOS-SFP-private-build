@@ -31,6 +31,7 @@ class DashboardToolsTests(unittest.TestCase):
         self.assertIn('stringByResolvingSymlinksInPath', source)
         self.assertIn('while (offset < (NSUInteger)size)', source)
         self.assertIn('size > 16 * 1024 * 1024', source)
+        self.assertIn('while (header.length < 65536)', source)
         self.assertIn('#import "DashboardTools.inc"', source)
         self.assertIn('- (NSData *)framedSocketCommand:(NSString *)command mime:(NSString *)mime error:(NSString **)error\n{', source)
         self.assertIn('[down lengthOfBytesUsingEncoding:NSUTF8StringEncoding]', source)
@@ -59,6 +60,9 @@ class DashboardToolsTests(unittest.TestCase):
         self.assertIn('id="axBudget"', html)
         self.assertIn('mode=${JSON.stringify(axSnapshotMode)}', html)
         self.assertIn('/api/ax/tree?mode=${encodeURIComponent(mode)}&budgetMs=${budget}', html)
+        self.assertIn('id="axDiagnostics"', html)
+        self.assertIn('id="axCopyDiagnostics"', html)
+        self.assertIn('id="axDownloadDiagnostics"', html)
         for control in ('axOverlay', 'axImage', 'axCopyCode', 'axDownloadCode',
                         'standaloneTemplate', 'visionCrop', 'screenExport'):
             self.assertIn('id="{}"'.format(control), html)
