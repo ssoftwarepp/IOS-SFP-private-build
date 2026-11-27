@@ -32,6 +32,11 @@ class Visible2095DiagnosticsContractTests(unittest.TestCase):
             self.assertIn('@"' + field + '"', self.source)
         self.assertIn("errorCode=%ld pid=%d axStatus=%@ attribute=%@ nodeIndex=%ld diagnostics=%@", self.source)
 
+    def test_json_macro_does_not_rewrite_objc_selector_keyword(self):
+        self.assertIn('#define ZX_VISIBLE_SERIALIZE(object, errorPointer)', self.source)
+        self.assertIn('options:NSJSONWritingSortedKeys error:(errorPointer)', self.source)
+        self.assertNotIn('#define ZX_VISIBLE_SERIALIZE(object, error)', self.source)
+
     def test_no_objc_ax_wrappers_and_handle_cleanup(self):
         self.assertNotIn("uiApplicationWithPid:", self.source)
         self.assertNotIn("uiElementsWithAttribute:", self.source)

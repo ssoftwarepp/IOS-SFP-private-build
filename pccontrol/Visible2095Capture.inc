@@ -3,7 +3,7 @@
 #define ZX_VISIBLE_NOW() ([NSProcessInfo processInfo].systemUptime)
 #endif
 #ifndef ZX_VISIBLE_SERIALIZE
-#define ZX_VISIBLE_SERIALIZE(object, error) [NSJSONSerialization dataWithJSONObject:(object) options:NSJSONWritingSortedKeys error:(error)]
+#define ZX_VISIBLE_SERIALIZE(object, errorPointer) [NSJSONSerialization dataWithJSONObject:(object) options:NSJSONWritingSortedKeys error:(errorPointer)]
 #endif
 
 @interface ZXVisibleCapture : NSObject
