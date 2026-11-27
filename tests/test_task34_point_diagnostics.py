@@ -122,7 +122,7 @@ class NativeContract(unittest.TestCase):
         self.assertLess(desktop, failure)
         self.assertIn('[foreground respondsToSelector:@selector(processState)]', capture)
         self.assertIn('[bundle isEqualToString:@"com.apple.springboard"]', capture)
-        self.assertIn('AXPOINT-20261128-01/task34/v2', source)
+        self.assertIn('AXPOINT-20261128-02/task34/v3', source)
 
     def test_deadline_and_ownership_paths(self):
         source = NATIVE.read_text(encoding='utf-8')
@@ -135,8 +135,19 @@ class NativeContract(unittest.TestCase):
         self.assertIn('if (!completionSubmitted) zxPointFinish(c);', source)
         self.assertIn('if (element) { CFRelease(element); element=NULL; }', source)
         self.assertIn('if (app) { CFRelease(app); app=NULL; }', source)
-        self.assertIn('c->axStatus != 0', source)
+        self.assertIn('if (hitStatus != 0)', source)
         self.assertIn('atomic_compare_exchange_strong_explicit', source)
+
+    def test_invalid_application_root_has_bounded_native_fallback(self):
+        source = NATIVE.read_text(encoding='utf-8')
+        self.assertIn('hitStatus == -25202 && r->createSystemWide', source)
+        self.assertIn('systemRoot = r->createSystemWide()', source)
+        self.assertIn('r->hit(systemRoot,&element,(float)c->point.x,(float)c->point.y)', source)
+        self.assertIn('if (systemRoot) { CFRelease(systemRoot); systemRoot=NULL; }', source)
+        for field in ('applicationHitStatus', 'systemHitStatus', 'systemRootSymbol',
+                      'systemRootAvailable', 'systemRootTried', 'hitRoot'):
+            self.assertIn('@"' + field + '"', source)
+        self.assertNotIn('AXChildren', source)
 
     def test_wire_only_task34_branch(self):
         source = TASK.read_text(encoding='utf-8')

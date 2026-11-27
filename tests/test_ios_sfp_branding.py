@@ -12,7 +12,7 @@ class IOSSFPBrandingTests(unittest.TestCase):
         for metadata in ('control', 'pccontrol/control'):
             content = (ROOT / metadata).read_text(encoding='utf-8')
             self.assertIn('Name: IOS-SFP', content)
-            self.assertIn('Version: 1.0.2-sfp11-axpoint20261128', content)
+            self.assertIn('Version: 1.0.2-sfp12-axpoint20261128', content)
         html = (ROOT / 'zxtouch/zxtouch/http/index.html').read_text(encoding='utf-8')
         self.assertIn('class="brand-title">IOS-SFP</h1>', html)
 

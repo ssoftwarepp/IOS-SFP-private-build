@@ -1,10 +1,14 @@
 # Task34 AX point direct-hit diagnostics — build preparation
 
-Marker: `AXPOINT-20261128-01/task34/v2`. Source baseline commit `f905b63cd84d6eed2601f3854543fce885ad6437`; rootless/roothide package version is `1.0.2-sfp11-axpoint20261128`. This identifies the prepared build inputs; neither a completed package build nor a target-device repair is claimed.
+Marker: `AXPOINT-20261128-02/task34/v3`. Source baseline commit `85723e58905e51ef974b67107e77ad6a30ac2a32`; rootless/roothide package version is `1.0.2-sfp12-axpoint20261128`. This identifies the prepared build inputs; neither a completed package build nor a target-device repair is claimed.
 
 ## Foreground PID repair (2026-11-28)
 
 Task34 now follows the existing tree PID fallback: focused PID, foreground application PID, foreground `processState` PID, then SpringBoard self PID only when the foreground object is absent or identifies `com.apple.springboard`. Every selected PID passes the existing live-process check. This repairs the missing processState branch that could report 3405 while tree capture succeeded. Desktop fallback, direct native hit testing, deadlines and ownership are preserved. Device validation remains pending.
+
+## Invalid application-root hit recovery (v3)
+
+Device v2 evidence: PID 42117, application root creation nonnull, direct hit status -25202 after 124ms. PID repair is effective; direct hit remains failed. v3 preserves the same direct function and float ABI. Only when application direct hit returns -25202, and AXUIElementCreateSystemWide is exported by the selected runtime, v3 creates a system-wide root and performs one direct native hit with the same point. No WithParams cast, traversal, frame containment or fabricated element is used. Both attempts share the original deadline. Failed nonnull outputs, application root and system root are released. Diagnostics contain applicationHitStatus, systemHitStatus, systemRootSymbol, systemRootAvailable, systemRootTried and hitRoot. Missing optional symbol or null system root leaves the original error intact. System-wide hits can identify overlays from other processes; the top-level pid continues to identify the selected foreground process, not a verified hit-owner PID. Root fallback is an implementation candidate, not a claimed target-device repair.
 
 ## Exact native operation
 

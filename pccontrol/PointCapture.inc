@@ -7,13 +7,15 @@
 #import <stdio.h>
 
 // Task34-only implementation. It never assigns the legacy zx* function pointers.
-static NSString *const zxPointMarker = @"AXPOINT-20261128-01/task34/v2";
+static NSString *const zxPointMarker = @"AXPOINT-20261128-02/task34/v3";
 typedef int32_t (*ZXPointHit)(CFTypeRef, CFTypeRef *, float, float);
+typedef CFTypeRef (*ZXPointCreateSystemWide)(void);
 typedef CFTypeID (*ZXPointElementTypeID)(void);
 
 typedef struct {
     ZXCreateApplication create;
     ZXPointHit hit;
+    ZXPointCreateSystemWide createSystemWide;
     ZXCopyAttribute copy;
     ZXSetTimeout timeout;
     ZXSetRequestingClient client;
@@ -84,6 +86,7 @@ static void zxPointInit(void) {
                 r->create = publicCreate ?: privateCreate;
                 r->createName = publicCreate ? "AXUIElementCreateApplication" : "_AXUIElementCreateAppElementWithPid";
                 r->hit = hit;
+                r->createSystemWide = (ZXPointCreateSystemWide)dlsym(handle, "AXUIElementCreateSystemWide");
                 r->copy = copy;
                 r->timeout = (ZXSetTimeout)dlsym(handle, "AXUIElementSetMessagingTimeout");
                 r->client = (ZXSetRequestingClient)dlsym(handle, "__AXSetRequestingClient");
@@ -117,6 +120,10 @@ static void zxPointInit(void) {
     BOOL inFlight;
     int code;
     int32_t axStatus;
+    int32_t appHitStatus;
+    int32_t systemHitStatus;
+    BOOL systemRootAvailable;
+    BOOL systemRootTried;
     pid_t pid;
     CGPoint point;
     NSString *lastStage;
@@ -130,7 +137,9 @@ static void zxPointInit(void) {
     self = [super init];
     if (self) {
         lock = [NSLock new]; wake = dispatch_semaphore_create(0);
-        axStatus = INT32_MIN; lastStage = @"created";
+        axStatus = INT32_MIN; appHitStatus = INT32_MIN;
+        systemHitStatus = INT32_MIN;
+        lastStage = @"created";
     }
     return self;
 }
@@ -285,6 +294,7 @@ static void zxPointCapture(ZXPointContext *c) {
     c->running = YES; c->inFlight = YES; c->lastStage = @"foreground-pid";
     [c->lock unlock];
     CFTypeRef app = NULL;
+    CFTypeRef systemRoot = NULL;
     CFTypeRef element = NULL;
     @try {
         const ZXPointRuntime *r = c->runtime;
@@ -321,9 +331,26 @@ static void zxPointCapture(ZXPointContext *c) {
         if (r->client) r->client(2);
         if (!zxPointStillLive(c)) return;
         int32_t hitStatus=r->hit(app,&element,(float)c->point.x,(float)c->point.y);
-        [c->lock lock]; c->axStatus=hitStatus; [c->lock unlock];
+        [c->lock lock]; c->appHitStatus=hitStatus; c->axStatus=hitStatus; [c->lock unlock];
         if (!zxPointStillLive(c)) return;
-        if (c->axStatus != 0) { zxPointClaim(c,3407,nil); return; }
+        if (hitStatus == -25202 && r->createSystemWide) {
+            if (element) { CFRelease(element); element=NULL; }
+            systemRoot = r->createSystemWide();
+            [c->lock lock]; c->systemRootAvailable=systemRoot != NULL; [c->lock unlock];
+            if (systemRoot) {
+                if (r->elementTypeID && CFGetTypeID(systemRoot) != r->elementTypeID()) {
+                    zxPointClaim(c,3409,nil); return;
+                }
+                if (!zxPointSetTimeout(c,systemRoot)) return;
+                if (r->client) r->client(2);
+                if (!zxPointStillLive(c)) return;
+                [c->lock lock]; c->systemRootTried=YES; [c->lock unlock];
+                hitStatus=r->hit(systemRoot,&element,(float)c->point.x,(float)c->point.y);
+                [c->lock lock]; c->systemHitStatus=hitStatus; c->axStatus=hitStatus; [c->lock unlock];
+                if (!zxPointStillLive(c)) return;
+            }
+        }
+        if (hitStatus != 0) { zxPointClaim(c,3407,nil); return; }
         if (!element) { zxPointClaim(c,3408,nil); return; }
         if (r->elementTypeID && CFGetTypeID(element) != r->elementTypeID()) { zxPointClaim(c,3409,nil); return; }
         [c->lock lock]; c->lastStage=@"node-build"; [c->lock unlock];
@@ -335,6 +362,7 @@ static void zxPointCapture(ZXPointContext *c) {
         zxPointClaim(c,3416,nil);
     } @finally {
         if (element) { CFRelease(element); element=NULL; }
+        if (systemRoot) { CFRelease(systemRoot); systemRoot=NULL; }
         if (app) { CFRelease(app); app=NULL; }
     }
 }
@@ -373,9 +401,9 @@ static NSData *zxPointEncodeDiagnostics(NSDictionary *details) {
 #endif
     return [NSJSONSerialization dataWithJSONObject:details options:0 error:nil];
 }
-static NSString *zxPointErrorDescription(int code, int32_t status, pid_t pid,
+static NSString *zxPointErrorDescriptionDetails(int code, int32_t status, pid_t pid,
                                          NSString *lastStage, BOOL inFlight, uint64_t elapsed,
-                                         const ZXPointRuntime *r) {
+                                         const ZXPointRuntime *r, NSDictionary *attempts) {
     NSString *stage = zxPointStage(code);
     NSString *statusText = status == INT32_MIN ? @"null" : [NSString stringWithFormat:@"%d",status];
     NSMutableDictionary *details = [@{@"schemaVersion":@1,@"task":@34,@"buildMarker":zxPointMarker,
@@ -386,6 +414,7 @@ static NSString *zxPointErrorDescription(int code, int32_t status, pid_t pid,
     if (r && r->image) details[@"runtimeImage"] = [NSString stringWithUTF8String:r->image];
     if (r && r->createName) details[@"createSymbol"] = [NSString stringWithUTF8String:r->createName];
     if (r && r->loaderError[0]) details[@"loaderError"] = zxPointString((__bridge CFTypeRef)[NSString stringWithUTF8String:r->loaderError],512);
+    if (attempts) [details addEntriesFromDictionary:attempts];
     NSData *encoded = nil;
     @try { encoded = zxPointEncodeDiagnostics(details); }
     @catch (NSException *exception) { encoded = nil; }
@@ -400,6 +429,17 @@ static NSString *zxPointErrorDescription(int code, int32_t status, pid_t pid,
         json = zxPointASCIIErrorJSON(code,status,pid,lastStage);
     return [NSString stringWithFormat:@"%@ stage=%@ code=%d axStatus=%@ diagnostics=%@",
             zxPointMarker,stage,code,statusText,json];
+}
+static NSString *zxPointErrorDescription(int code, int32_t status, pid_t pid,
+    NSString *stage, BOOL inFlight, uint64_t elapsed, const ZXPointRuntime *r) {
+    return zxPointErrorDescriptionDetails(code,status,pid,stage,inFlight,elapsed,r,nil);
+}
+static NSDictionary *zxPointAttemptsLocked(ZXPointContext *c) {
+    return @{@"applicationHitStatus": c->appHitStatus == INT32_MIN ? (id)[NSNull null] : @(c->appHitStatus),
+        @"systemHitStatus": c->systemHitStatus == INT32_MIN ? (id)[NSNull null] : @(c->systemHitStatus),
+        @"systemRootSymbol": @(c->runtime && c->runtime->createSystemWide != NULL),
+        @"systemRootAvailable": @(c->systemRootAvailable), @"systemRootTried": @(c->systemRootTried),
+        @"hitRoot": c->systemRootTried ? @"system-wide" : @"application"};
 }
 static NSError *zxPointError(int code, int32_t status, pid_t pid, NSString *stage,
                              BOOL inFlight, uint64_t elapsed, const ZXPointRuntime *r) {
@@ -476,9 +516,11 @@ NSData *zxCopyAccessibilityElementAtPoint(CGPoint point, NSError **error) {
                         @try {
                             if (zxPointStillLive(c)) {
                                 [c->lock lock]; c->lastStage=@"json-serialize"; [c->lock unlock];
+                                [c->lock lock]; NSMutableDictionary *attempts=[zxPointAttemptsLocked(c) mutableCopy]; [c->lock unlock];
+                                attempts[@"stage"]=@"complete"; attempts[@"errorCode"]=@0;
                                 NSDictionary *payload=@{@"pid":@(c->pid),@"x":@(c->point.x),@"y":@(c->point.y),
                                     @"element":c->leaf,@"buildMarker":zxPointMarker,
-                                    @"diagnostics":@{@"stage":@"complete",@"errorCode":@0}};
+                                    @"diagnostics":attempts};
                                 NSData *body=[NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
                                 zxPointClaim(c,body.length && body.length<=65536 ? 0 : (body ? 3417 : 3410),body);
                             }
@@ -503,9 +545,11 @@ NSData *zxCopyAccessibilityElementAtPoint(CGPoint point, NSError **error) {
     int32_t raw=c->axStatus; pid_t pid=c->pid;
     BOOL inFlight=c->inFlight || !c->releasedPermit;
     NSString *stage=[c->lastStage copy]; const ZXPointRuntime *runtime=c->runtime;
+    NSDictionary *attempts=zxPointAttemptsLocked(c);
     [c->lock unlock];
     if (c->queueTimer) { dispatch_source_cancel(c->queueTimer); c->queueTimer=nil; }
     if (c->totalTimer) { dispatch_source_cancel(c->totalTimer); c->totalTimer=nil; }
-    if (code && error) *error=zxPointError(code,raw,pid,stage,inFlight,zxPointNow()-start,runtime);
+    if (code && error) *error=[NSError errorWithDomain:@"ZXTouchAXTask34" code:code userInfo:@{
+        NSLocalizedDescriptionKey:zxPointErrorDescriptionDetails(code,raw,pid,stage,inFlight,zxPointNow()-start,runtime,attempts)}];
     return code ? nil : result;
 }
