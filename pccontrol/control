@@ -1,7 +1,7 @@
 Package: com.zjx.pccontrol
 Name: IOS-SFP
 Depends: mobilesubstrate | ellekit, firmware (>= 15.0), python3
-Version: 1.0.2-sfp10-axpoint20261127
+Version: 1.0.2-sfp11-axpoint20261128
 Architecture: iphoneos-arm64
 Description: ZXTouch rootless with AX queries and Chinese dashboard (iOS 15-18)
 Maintainer: softwarpp

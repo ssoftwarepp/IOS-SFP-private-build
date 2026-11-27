@@ -110,6 +110,20 @@ class NativeContract(unittest.TestCase):
         self.assertNotIn('dlclose(', source.replace('Never dlclose(', ''))
         self.assertNotIn('zxCopyAttribute =', source)
 
+    def test_process_state_fallback_precedes_desktop_fallback(self):
+        source = NATIVE.read_text(encoding='utf-8')
+        capture = source.split('static void zxPointCapture(', 1)[1]
+        direct = capture.index('c->pid=zxPIDFromObject(foreground)')
+        state = capture.index('pid_t statePID = zxPIDFromObject(state)')
+        desktop = capture.index('c->pid=getpid()')
+        failure = capture.index('zxPointClaim(c,3405,nil)')
+        self.assertLess(direct, state)
+        self.assertLess(state, desktop)
+        self.assertLess(desktop, failure)
+        self.assertIn('[foreground respondsToSelector:@selector(processState)]', capture)
+        self.assertIn('[bundle isEqualToString:@"com.apple.springboard"]', capture)
+        self.assertIn('AXPOINT-20261128-01/task34/v2', source)
+
     def test_deadline_and_ownership_paths(self):
         source = NATIVE.read_text(encoding='utf-8')
         header = (ROOT / 'pccontrol/PointDeadline.h').read_text(encoding='utf-8')

@@ -1,6 +1,10 @@
 # Task34 AX point direct-hit diagnostics — build preparation
 
-Marker: `AXPOINT-20261127-01/task34/v1`. Source baseline commit `6ccdbd769713265e322ba4b473f8fbdb8834b112`; rootless/roothide package version is `1.0.2-sfp10-axpoint20261127`. This identifies the prepared build inputs; neither a completed package build nor a target-device repair is claimed.
+Marker: `AXPOINT-20261128-01/task34/v2`. Source baseline commit `f905b63cd84d6eed2601f3854543fce885ad6437`; rootless/roothide package version is `1.0.2-sfp11-axpoint20261128`. This identifies the prepared build inputs; neither a completed package build nor a target-device repair is claimed.
+
+## Foreground PID repair (2026-11-28)
+
+Task34 now follows the existing tree PID fallback: focused PID, foreground application PID, foreground `processState` PID, then SpringBoard self PID only when the foreground object is absent or identifies `com.apple.springboard`. Every selected PID passes the existing live-process check. This repairs the missing processState branch that could report 3405 while tree capture succeeded. Desktop fallback, direct native hit testing, deadlines and ownership are preserved. Device validation remains pending.
 
 ## Exact native operation
 

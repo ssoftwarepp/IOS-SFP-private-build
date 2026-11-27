@@ -7,7 +7,7 @@
 #import <stdio.h>
 
 // Task34-only implementation. It never assigns the legacy zx* function pointers.
-static NSString *const zxPointMarker = @"AXPOINT-20261127-01/task34/v1";
+static NSString *const zxPointMarker = @"AXPOINT-20261128-01/task34/v2";
 typedef int32_t (*ZXPointHit)(CFTypeRef, CFTypeRef *, float, float);
 typedef CFTypeID (*ZXPointElementTypeID)(void);
 
@@ -293,6 +293,11 @@ static void zxPointCapture(ZXPointContext *c) {
         if (!zxIsLivePID(c->pid)) {
             id foreground = getFrontMostApplication();
             [c->lock lock]; c->pid=zxPIDFromObject(foreground); [c->lock unlock];
+            if (!zxIsLivePID(c->pid) && [foreground respondsToSelector:@selector(processState)]) {
+                id state = ((id (*)(id,SEL))objc_msgSend)(foreground,@selector(processState));
+                pid_t statePID = zxPIDFromObject(state);
+                [c->lock lock]; c->pid=statePID; [c->lock unlock];
+            }
             NSString *bundle = [foreground respondsToSelector:@selector(bundleIdentifier)] ?
                 ((id (*)(id,SEL))objc_msgSend)(foreground,@selector(bundleIdentifier)) : nil;
             if (!zxIsLivePID(c->pid) && (!foreground || [bundle isEqualToString:@"com.apple.springboard"])) {
