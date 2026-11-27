@@ -24,6 +24,14 @@ jobs:
       - name: Run Python tests
         run: python3 -m unittest discover -s tests -v
 
+      - name: Run Task34 native fixtures
+        run: |
+          set -euo pipefail
+          clang++ -std=c++17 -fobjc-arc -fblocks -framework Foundation -framework CoreGraphics tests/native/task34_leaf.mm -o "$RUNNER_TEMP/task34_leaf"
+          "$RUNNER_TEMP/task34_leaf"
+          clang++ -std=c++17 -fobjc-arc -fblocks -framework Foundation -framework CoreGraphics tests/native/task34_deadline.mm -o "$RUNNER_TEMP/task34_deadline"
+          "$RUNNER_TEMP/task34_deadline"
+
       - name: Build iOS App
         run: |
           set -o pipefail

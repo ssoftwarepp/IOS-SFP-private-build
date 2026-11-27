@@ -33,7 +33,7 @@ class zxtouch:
             raise TimeoutError("ZXTouch AX query exceeded {} seconds; reconnect the client".format(timeout)) from None
         finally:
             del self._ax_deadline_at
-            if not timed_out:
+            if not timed_out and getattr(self.s, "fileno", lambda: 0)() != -1:
                 self.s.settimeout(previous)
 
     def _ax_remaining(self):
@@ -44,23 +44,30 @@ class zxtouch:
                 raise TimeoutError("AX query deadline exceeded")
             self.s.settimeout(remaining)
 
-    def _recv_line(self):
-        """Receive one CRLF-terminated protocol line without losing extra bytes."""
+    def _recv_line(self, max_bytes=None):
+        """Receive one CRLF line, leaving the next packet in the buffer."""
         delimiter = b"\r\n"
         while True:
             delimiter_index = self._recv_buffer.find(delimiter)
             if delimiter_index >= 0:
                 line_end = delimiter_index + len(delimiter)
+                if max_bytes is not None and line_end > max_bytes:
+                    self._recv_buffer.clear()
+                    self.s.close()
+                    raise RuntimeError("ZXTouch point response header exceeds 65536 bytes; reconnect the client")
                 line = bytes(self._recv_buffer[:line_end])
                 del self._recv_buffer[:line_end]
                 return line
-
+            if max_bytes is not None and len(self._recv_buffer) > max_bytes:
+                self._recv_buffer.clear()
+                self.s.close()
+                raise RuntimeError("ZXTouch point response header exceeds 65536 bytes; reconnect the client")
             self._ax_remaining()
             chunk = self.s.recv(4096)
             if not chunk:
                 raise ConnectionError("ZXTouch connection closed before a complete response header was received")
             self._recv_buffer.extend(chunk)
-            if len(self._recv_buffer) > 1024 * 1024:
+            if max_bytes is None and len(self._recv_buffer) > 1024 * 1024:
                 raise RuntimeError("ZXTouch response header exceeds 1 MiB")
 
     def _recv_exact(self, size):
@@ -638,26 +645,39 @@ class zxtouch:
             raise RuntimeError("Invalid JSON response length")
         return json.loads(self._recv_exact(length))
 
-    def _json_query(self, task, payload):
+    def _json_query(self, task, payload, header_limit=None, response_limit=16 * 1024 * 1024):
         """Send a base64 JSON request and read one length-framed JSON response."""
         import base64
         import json
         body = base64.b64encode(json.dumps(payload, ensure_ascii=False).encode("utf-8")).decode("ascii")
         self.s.sendall(datahandler.format_socket_data(task, body))
-        fields = self._recv_line()[:-2].split(b";;")
+        fields = self._recv_line(header_limit)[:-2].split(b";;")
         if not fields or fields[0] != b"0":
             raise RuntimeError(fields[1].decode("utf-8", errors="replace") if len(fields) > 1 else "device query failed")
         if len(fields) != 3 or fields[1] != b"application/json":
+            if header_limit is not None:
+                self._recv_buffer.clear()
+                self.s.close()
             raise RuntimeError("Malformed JSON response header")
-        length = int(fields[2])
-        if length <= 0 or length > 16 * 1024 * 1024:
+        try:
+            length = int(fields[2])
+        except ValueError as error:
+            if header_limit is not None:
+                self._recv_buffer.clear()
+                self.s.close()
+            raise RuntimeError("Malformed JSON response length") from error
+        if length <= 0 or length > response_limit:
+            if header_limit is not None:
+                self._recv_buffer.clear()
+                self.s.close()
             raise RuntimeError("Invalid JSON response length")
         return json.loads(self._recv_exact(length))
 
     def get_element_at_point(self, x, y, timeout=10):
         """Hit-test a logical screen point within timeout seconds."""
         with self._ax_deadline(timeout):
-            return self._json_query(tasktypes.TASK_ACCESSIBILITY_AT_POINT, {"x": x, "y": y})
+            return self._json_query(tasktypes.TASK_ACCESSIBILITY_AT_POINT, {"x": x, "y": y},
+                                    header_limit=65536, response_limit=65536)
 
     def match_templates(self, templates, *, masks=None, region=None, threshold=0.85,
                         max_results=30, min_scale=1, max_scale=1, steps=1):

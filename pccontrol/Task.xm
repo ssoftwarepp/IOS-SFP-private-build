@@ -407,6 +407,26 @@ void processTask(UInt8 *buff, CFWriteStreamRef writeStreamRef)
                 result = zxCopyAccessibilityElementAtPoint(CGPointMake([request[@"x"] doubleValue],
                                                                       [request[@"y"] doubleValue]), &error);
             }
+            if (taskType == TASK_ACCESSIBILITY_AT_POINT) {
+                static const UInt8 fallback[] = "-1;;AXPOINT-20261127-01/task34/v1 stage=protocol-size code=3417 diagnostics={}\r\n";
+                if (!result) {
+                    NSString *description = error.localizedDescription ?: @"Invalid AX position";
+                    NSString *message = [NSString stringWithFormat:@"-1;;%@\r\n", description];
+                    NSData *line = [message dataUsingEncoding:NSUTF8StringEncoding];
+                    BOOL safe = line.length > 0 && line.length <= 65536 &&
+                        [description rangeOfString:@";;"].location == NSNotFound &&
+                        [description rangeOfString:@"\r"].location == NSNotFound &&
+                        [description rangeOfString:@"\n"].location == NSNotFound;
+                    if (safe) notifyClientData((const UInt8 *)line.bytes,(CFIndex)line.length,writeStreamRef);
+                    else notifyClientData(fallback,sizeof(fallback)-1,writeStreamRef);
+                    return;
+                }
+                if (result.length == 0 || result.length > 65536 ||
+                    ![[NSString alloc] initWithData:result encoding:NSUTF8StringEncoding]) {
+                    notifyClientData(fallback,sizeof(fallback)-1,writeStreamRef);
+                    return;
+                }
+            }
             if (!result) {
                 NSString *message = [NSString stringWithFormat:@"-1;;%@\r\n",
                                      error.localizedDescription ?: @"Invalid AX position"];
