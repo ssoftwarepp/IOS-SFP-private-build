@@ -7,14 +7,16 @@
 #import <stdio.h>
 
 // Task34-only implementation. It never assigns the legacy zx* function pointers.
-static NSString *const zxPointMarker = @"AXPOINT-20261128-02/task34/v3";
+static NSString *const zxPointMarker = @"AXPOINT-20261128-03/task34/v4";
 typedef int32_t (*ZXPointHit)(CFTypeRef, CFTypeRef *, float, float);
+typedef int32_t (*ZXPointHitWithParams)(CFTypeRef, CFTypeRef *, int32_t, float, float);
 typedef CFTypeRef (*ZXPointCreateSystemWide)(void);
 typedef CFTypeID (*ZXPointElementTypeID)(void);
 
 typedef struct {
     ZXCreateApplication create;
     ZXPointHit hit;
+    ZXPointHitWithParams hitWithParams;
     ZXPointCreateSystemWide createSystemWide;
     ZXCopyAttribute copy;
     ZXSetTimeout timeout;
@@ -86,6 +88,7 @@ static void zxPointInit(void) {
                 r->create = publicCreate ?: privateCreate;
                 r->createName = publicCreate ? "AXUIElementCreateApplication" : "_AXUIElementCreateAppElementWithPid";
                 r->hit = hit;
+                r->hitWithParams = (ZXPointHitWithParams)dlsym(handle, "AXUIElementCopyElementAtPositionWithParams");
                 r->createSystemWide = (ZXPointCreateSystemWide)dlsym(handle, "AXUIElementCreateSystemWide");
                 r->copy = copy;
                 r->timeout = (ZXSetTimeout)dlsym(handle, "AXUIElementSetMessagingTimeout");
@@ -121,9 +124,13 @@ static void zxPointInit(void) {
     int code;
     int32_t axStatus;
     int32_t appHitStatus;
+    int32_t appParamsStatus;
     int32_t systemHitStatus;
+    int32_t systemParamsStatus;
     BOOL systemRootAvailable;
     BOOL systemRootTried;
+    BOOL appParamsTried;
+    NSString *hitMode;
     pid_t pid;
     CGPoint point;
     NSString *lastStage;
@@ -138,8 +145,9 @@ static void zxPointInit(void) {
     if (self) {
         lock = [NSLock new]; wake = dispatch_semaphore_create(0);
         axStatus = INT32_MIN; appHitStatus = INT32_MIN;
-        systemHitStatus = INT32_MIN;
-        lastStage = @"created";
+        appParamsStatus = INT32_MIN; systemHitStatus = INT32_MIN;
+        systemParamsStatus = INT32_MIN;
+        hitMode = @"none"; lastStage = @"created";
     }
     return self;
 }
@@ -330,13 +338,16 @@ static void zxPointCapture(ZXPointContext *c) {
         if (!zxPointSetTimeout(c,app)) return;
         if (r->client) r->client(2);
         if (!zxPointStillLive(c)) return;
+        [c->lock lock]; c->hitMode=@"application-direct"; [c->lock unlock];
         int32_t hitStatus=r->hit(app,&element,(float)c->point.x,(float)c->point.y);
         [c->lock lock]; c->appHitStatus=hitStatus; c->axStatus=hitStatus; [c->lock unlock];
         if (!zxPointStillLive(c)) return;
-        if (hitStatus == -25202 && r->createSystemWide) {
+        if (hitStatus == -25202 && r->hitWithParams) {
             if (element) { CFRelease(element); element=NULL; }
-            systemRoot = r->createSystemWide();
-            [c->lock lock]; c->systemRootAvailable=systemRoot != NULL; [c->lock unlock];
+            if (r->createSystemWide) {
+                systemRoot = r->createSystemWide();
+                [c->lock lock]; c->systemRootAvailable=systemRoot != NULL; [c->lock unlock];
+            }
             if (systemRoot) {
                 if (r->elementTypeID && CFGetTypeID(systemRoot) != r->elementTypeID()) {
                     zxPointClaim(c,3409,nil); return;
@@ -344,9 +355,19 @@ static void zxPointCapture(ZXPointContext *c) {
                 if (!zxPointSetTimeout(c,systemRoot)) return;
                 if (r->client) r->client(2);
                 if (!zxPointStillLive(c)) return;
-                [c->lock lock]; c->systemRootTried=YES; [c->lock unlock];
-                hitStatus=r->hit(systemRoot,&element,(float)c->point.x,(float)c->point.y);
-                [c->lock lock]; c->systemHitStatus=hitStatus; c->axStatus=hitStatus; [c->lock unlock];
+                [c->lock lock]; c->systemRootTried=YES; c->hitMode=@"systemwide-with-params"; [c->lock unlock];
+                hitStatus=r->hitWithParams(systemRoot,&element,1,(float)c->point.x,(float)c->point.y);
+                [c->lock lock]; c->systemParamsStatus=hitStatus; c->axStatus=hitStatus; [c->lock unlock];
+                if (!zxPointStillLive(c)) return;
+            }
+            if (hitStatus != 0 || !element) {
+                if (element) { CFRelease(element); element=NULL; }
+                if (!zxPointSetTimeout(c,app)) return;
+                if (r->client) r->client(2);
+                if (!zxPointStillLive(c)) return;
+                [c->lock lock]; c->appParamsTried=YES; c->hitMode=@"application-with-params"; [c->lock unlock];
+                hitStatus=r->hitWithParams(app,&element,1,(float)c->point.x,(float)c->point.y);
+                [c->lock lock]; c->appParamsStatus=hitStatus; c->axStatus=hitStatus; [c->lock unlock];
                 if (!zxPointStillLive(c)) return;
             }
         }
@@ -436,10 +457,16 @@ static NSString *zxPointErrorDescription(int code, int32_t status, pid_t pid,
 }
 static NSDictionary *zxPointAttemptsLocked(ZXPointContext *c) {
     return @{@"applicationHitStatus": c->appHitStatus == INT32_MIN ? (id)[NSNull null] : @(c->appHitStatus),
+        @"applicationWithParamsStatus": c->appParamsStatus == INT32_MIN ? (id)[NSNull null] : @(c->appParamsStatus),
         @"systemHitStatus": c->systemHitStatus == INT32_MIN ? (id)[NSNull null] : @(c->systemHitStatus),
+        @"systemWithParamsStatus": c->systemParamsStatus == INT32_MIN ? (id)[NSNull null] : @(c->systemParamsStatus),
+        @"runtimeWithParamsSymbol": @(c->runtime && c->runtime->hitWithParams != NULL),
         @"systemRootSymbol": @(c->runtime && c->runtime->createSystemWide != NULL),
         @"systemRootAvailable": @(c->systemRootAvailable), @"systemRootTried": @(c->systemRootTried),
-        @"hitRoot": c->systemRootTried ? @"system-wide" : @"application"};
+        @"applicationWithParamsTried": @(c->appParamsTried),
+        @"systemWithParamsTried": @(c->systemRootTried),
+        @"hitRoot": c->appParamsTried ? @"application" : (c->systemRootTried ? @"system-wide" : @"application"),
+        @"hitMode": c->hitMode ?: @"none"};
 }
 static NSError *zxPointError(int code, int32_t status, pid_t pid, NSString *stage,
                              BOOL inFlight, uint64_t elapsed, const ZXPointRuntime *r) {

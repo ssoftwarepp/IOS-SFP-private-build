@@ -1,6 +1,6 @@
 # Task34 AX point direct-hit diagnostics — build preparation
 
-Marker: `AXPOINT-20261128-02/task34/v3`. Source baseline commit `85723e58905e51ef974b67107e77ad6a30ac2a32`; rootless/roothide package version is `1.0.2-sfp12-axpoint20261128`. This identifies the prepared build inputs; neither a completed package build nor a target-device repair is claimed.
+Marker: `AXPOINT-20261128-03/task34/v4`. Source baseline commit `5712cdbe447c91b1edcf340aee4054e396111882`; rootless/roothide package version is `1.0.2-sfp13-axpoint20261128`. This identifies the prepared build inputs; neither a completed package build nor a target-device repair is claimed.
 
 ## Foreground PID repair (2026-11-28)
 
@@ -10,9 +10,13 @@ Task34 now follows the existing tree PID fallback: focused PID, foreground appli
 
 Device v2 evidence: PID 42117, application root creation nonnull, direct hit status -25202 after 124ms. PID repair is effective; direct hit remains failed. v3 preserves the same direct function and float ABI. Only when application direct hit returns -25202, and AXUIElementCreateSystemWide is exported by the selected runtime, v3 creates a system-wide root and performs one direct native hit with the same point. No WithParams cast, traversal, frame containment or fabricated element is used. Both attempts share the original deadline. Failed nonnull outputs, application root and system root are released. Diagnostics contain applicationHitStatus, systemHitStatus, systemRootSymbol, systemRootAvailable, systemRootTried and hitRoot. Missing optional symbol or null system root leaves the original error intact. System-wide hits can identify overlays from other processes; the top-level pid continues to identify the selected foreground process, not a verified hit-owner PID. Root fallback is an implementation candidate, not a claimed target-device repair.
 
+## WithParams native hit investigation (v4)
+
+Device v3 evidence: pid 43868, app direct -25202 and system-wide direct -25202, selected AXRuntime; both roots existed and completed in 64ms. v4 preserves the app direct path. On app direct -25202 it resolves the optional AXRuntime `AXUIElementCopyElementAtPositionWithParams` symbol from the same image. It calls system-wide WithParams(root, out, 1, x, y) when its root exists, then application WithParams(root, out, 1, x, y) if the preceding attempt failed or returned no element. Failed nonnull outputs are released before another call. Each call checks the same deadline and sets messaging timeout based on remaining budget. Diagnostics report per-root WithParams status, availability, tried flags and hit mode. The actual mobile ABI and target-device success remain unverified; native fixture tests cover only synthetic calls.
+
 ## Exact native operation
 
-Task34 alone resolves `AXUIElementCreateApplication`, falling back to `_AXUIElementCreateAppElementWithPid` when absent, and calls exact `AXUIElementCopyElementAtPosition(application, &element, (float)x, (float)y)`. AXRuntime and the two known Accessibility image paths are the only AX candidates. FrontBoard image is a separate PID helper. There is no WithParams alias, traversal or frame-containment substitute. iOS SDK stub / sibling mobile source support the candidate; target-device export and typed mobile call remain WAITING.
+Task34 alone resolves `AXUIElementCreateApplication`, falling back to `_AXUIElementCreateAppElementWithPid` when absent, and calls exact `AXUIElementCopyElementAtPosition(application, &element, (float)x, (float)y)`. AXRuntime and the two known Accessibility image paths are the only AX candidates. FrontBoard image is a separate PID helper. The optional WithParams entry has a separate typed function pointer and flags=1; no traversal or frame-containment substitute is used. iOS SDK stub / sibling mobile source support the candidate; target-device export and typed mobile call remain WAITING.
 
 `PointCapture.inc` has a private runtime table, one process-lifetime pin per successfully opened image (maximum four), and no request-path `dlclose`. `RTLD_DEFAULT` is not used. No Task34 write to the legacy `zx*` function table. The actual selected create/image and raw signed hit AX status are included in bounded diagnostics. Main-queue capture owns the application, returned hit element, and each CopyAttributeValue output in separate `@finally`/per-attribute release; a nonzero hit status with a nonnull element still releases the element. No AXChildren enumeration is involved.
 

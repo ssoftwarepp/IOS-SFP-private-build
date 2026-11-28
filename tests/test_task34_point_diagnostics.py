@@ -106,7 +106,8 @@ class NativeContract(unittest.TestCase):
         self.assertEqual(entry.count('NSData *zxCopyAccessibilityElementAtPoint('), 0)
         self.assertIn('"_AXUIElementCreateAppElementWithPid"', source)
         self.assertIn('"AXUIElementCopyElementAtPosition"', source)
-        self.assertNotIn('CopyElementAtPositionWithParams', source)
+        self.assertIn('CopyElementAtPositionWithParams', source)
+        self.assertIn('ZXPointHitWithParams', source)
         self.assertNotIn('dlclose(', source.replace('Never dlclose(', ''))
         self.assertNotIn('zxCopyAttribute =', source)
 
@@ -122,7 +123,7 @@ class NativeContract(unittest.TestCase):
         self.assertLess(desktop, failure)
         self.assertIn('[foreground respondsToSelector:@selector(processState)]', capture)
         self.assertIn('[bundle isEqualToString:@"com.apple.springboard"]', capture)
-        self.assertIn('AXPOINT-20261128-02/task34/v3', source)
+        self.assertIn('AXPOINT-20261128-03/task34/v4', source)
 
     def test_deadline_and_ownership_paths(self):
         source = NATIVE.read_text(encoding='utf-8')
@@ -140,9 +141,13 @@ class NativeContract(unittest.TestCase):
 
     def test_invalid_application_root_has_bounded_native_fallback(self):
         source = NATIVE.read_text(encoding='utf-8')
-        self.assertIn('hitStatus == -25202 && r->createSystemWide', source)
+        self.assertIn('hitStatus == -25202 && r->hitWithParams', source)
+        self.assertIn('r->hitWithParams(systemRoot,&element,1', source)
+        self.assertIn('r->hitWithParams(app,&element,1', source)
+        self.assertIn('applicationWithParamsStatus', source)
+        self.assertIn('systemWithParamsStatus', source)
         self.assertIn('systemRoot = r->createSystemWide()', source)
-        self.assertIn('r->hit(systemRoot,&element,(float)c->point.x,(float)c->point.y)', source)
+        self.assertNotIn('r->hit(systemRoot,&element,(float)c->point.x,(float)c->point.y)', source)
         self.assertIn('if (systemRoot) { CFRelease(systemRoot); systemRoot=NULL; }', source)
         for field in ('applicationHitStatus', 'systemHitStatus', 'systemRootSymbol',
                       'systemRootAvailable', 'systemRootTried', 'hitRoot'):

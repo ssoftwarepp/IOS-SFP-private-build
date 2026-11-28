@@ -53,25 +53,32 @@ static int32_t fixtureCopy(CFTypeRef element,CFStringRef key,CFTypeRef *out) {
     return *out ? 0 : -25212;
 }
 
-// Retain one fixture-owned reference to each mock AX object so that the capture's
-// returned +1 references can be checked after its @finally cleanup.
+// Keep fixture-owned +1 references so every returned AX object can be checked
+// after capture cleanup, including nonzero-status and status-zero/null outputs.
 static CFTypeRef fixtureAppRoot;
 static CFTypeRef fixtureSystemRoot;
 static CFTypeRef fixtureAppElement;
 static CFTypeRef fixtureSystemElement;
+static CFTypeRef fixtureParamsElement;
 static unsigned fixtureAppCreates;
 static unsigned fixtureSystemCreates;
-static unsigned fixtureAppHits;
-static unsigned fixtureSystemHits;
+static unsigned fixtureDirectHits;
+static unsigned fixtureSystemParamsHits;
+static unsigned fixtureAppParamsHits;
 static unsigned fixtureTimeouts;
+static char fixtureOrder[4];
+static unsigned fixtureOrderLength;
 static int fixtureCaptureCase;
 
 enum {
     fixtureAppSuccess,
     fixtureSystemSuccess,
-    fixtureBothFail,
+    fixtureSystemFailAppSuccess,
+    fixtureAllFail,
+    fixtureNoParamsSymbol,
     fixtureNoSystemSymbol,
-    fixtureNullSystemRoot
+    fixtureNullSystemRoot,
+    fixtureSystemNullOutput
 };
 
 static CFTypeRef fixtureCreateApp(pid_t pid) {
@@ -81,88 +88,158 @@ static CFTypeRef fixtureCreateApp(pid_t pid) {
 }
 static CFTypeRef fixtureCreateSystem(void) {
     ++fixtureSystemCreates;
-    if (fixtureCaptureCase == fixtureNullSystemRoot) return NULL;
-    // The failed application's output must be released before system creation.
+    // A failed direct hit's nonnull output must be released before fallback.
     assert(CFGetRetainCount(fixtureAppElement) == 1);
+    if (fixtureCaptureCase == fixtureNullSystemRoot) return NULL;
     return CFRetain(fixtureSystemRoot);
 }
 static int32_t fixtureCaptureTimeout(CFTypeRef root,float seconds) {
     assert(root == fixtureAppRoot || root == fixtureSystemRoot ||
-           root == fixtureAppElement || root == fixtureSystemElement);
+           root == fixtureAppElement || root == fixtureSystemElement ||
+           root == fixtureParamsElement);
     assert(seconds > 0);
     ++fixtureTimeouts;
     return 0;
 }
+static void fixtureRecord(char step) {
+    assert(fixtureOrderLength < sizeof(fixtureOrder)-1);
+    fixtureOrder[fixtureOrderLength++]=step;
+    fixtureOrder[fixtureOrderLength]=0;
+}
 static int32_t fixtureHit(CFTypeRef root,CFTypeRef *out,float x,float y) {
-    assert(x == 17 && y == 29);
+    assert(root == fixtureAppRoot);
+    assert(x == 17.25f && y == 29.5f);
     assert(*out == NULL);
-    if (root == fixtureAppRoot) {
-        ++fixtureAppHits;
-        *out=CFRetain(fixtureAppElement);
-        return fixtureCaptureCase == fixtureAppSuccess ? 0 : -25202;
+    ++fixtureDirectHits;
+    fixtureRecord('D');
+    *out=CFRetain(fixtureAppElement);
+    return fixtureCaptureCase == fixtureAppSuccess ? 0 : -25202;
+}
+static int32_t fixtureHitWithParams(CFTypeRef root,CFTypeRef *out,int32_t flags,float x,float y) {
+    assert(flags == 1);
+    assert(x == 17.25f && y == 29.5f);
+    assert(*out == NULL);
+    assert(CFGetRetainCount(fixtureAppElement) == 1);
+    if (root == fixtureSystemRoot) {
+        ++fixtureSystemParamsHits;
+        fixtureRecord('S');
+        if (fixtureCaptureCase == fixtureSystemNullOutput) return 0;
+        *out=CFRetain(fixtureSystemElement);
+        return fixtureCaptureCase == fixtureSystemFailAppSuccess ||
+               fixtureCaptureCase == fixtureAllFail ? -25212 : 0;
     }
-    assert(root == fixtureSystemRoot);
-    ++fixtureSystemHits;
-    *out=CFRetain(fixtureSystemElement);
-    return fixtureCaptureCase == fixtureBothFail ? -25212 : 0;
+    assert(root == fixtureAppRoot);
+    ++fixtureAppParamsHits;
+    fixtureRecord('A');
+    // A failed system hit must release its nonnull output before app retry.
+    assert(CFGetRetainCount(fixtureSystemElement) == 1);
+    *out=CFRetain(fixtureParamsElement);
+    return fixtureCaptureCase == fixtureAllFail ? -25212 : 0;
 }
 static void fixtureTestCapture(int scenario) {
     fixtureCaptureCase=scenario;
-    fixtureAppCreates=fixtureSystemCreates=fixtureAppHits=fixtureSystemHits=fixtureTimeouts=0;
+    fixtureAppCreates=fixtureSystemCreates=fixtureDirectHits=0;
+    fixtureSystemParamsHits=fixtureAppParamsHits=fixtureTimeouts=fixtureOrderLength=0;
+    fixtureOrder[0]=0;
     fixtureAppRoot=CFDataCreateMutable(kCFAllocatorDefault,0);
     fixtureSystemRoot=CFDataCreateMutable(kCFAllocatorDefault,0);
     fixtureAppElement=CFDataCreateMutable(kCFAllocatorDefault,0);
     fixtureSystemElement=CFDataCreateMutable(kCFAllocatorDefault,0);
+    fixtureParamsElement=CFDataCreateMutable(kCFAllocatorDefault,0);
     ZXPointRuntime table={};
     table.create=fixtureCreateApp;
     table.createSystemWide=scenario == fixtureNoSystemSymbol ? NULL : fixtureCreateSystem;
     table.hit=fixtureHit;
+    table.hitWithParams=scenario == fixtureNoParamsSymbol ? NULL : fixtureHitWithParams;
     table.copy=fixtureCopy;
     table.timeout=fixtureCaptureTimeout;
     ZXPointContext *context=[ZXPointContext new];
     context->runtime=&table;
     context->start=zxPointNow();
-    context->point=CGPointMake(17,29);
+    context->point=CGPointMake(17.25,29.5);
     fixtureVariant=0;
     zxPointCapture(context);
 
-    BOOL triedSystem=scenario == fixtureSystemSuccess || scenario == fixtureBothFail;
-    BOOL systemAvailable=triedSystem;
-    BOOL success=scenario == fixtureAppSuccess || scenario == fixtureSystemSuccess;
-    assert(fixtureAppCreates == 1 && fixtureAppHits == 1);
-    assert(fixtureSystemCreates == (scenario == fixtureAppSuccess ||
-           scenario == fixtureNoSystemSymbol ? 0 : 1));
-    assert(fixtureSystemHits == (triedSystem ? 1 : 0));
-    if (success) assert(fixtureTimeouts > (triedSystem ? 2U : 1U));
-    else assert(fixtureTimeouts == (triedSystem ? 2U : 1U));
+    BOOL triedSystem=scenario == fixtureSystemSuccess || scenario == fixtureSystemFailAppSuccess ||
+                     scenario == fixtureAllFail || scenario == fixtureSystemNullOutput;
+    BOOL triedAppParams=scenario == fixtureSystemFailAppSuccess || scenario == fixtureAllFail ||
+                        scenario == fixtureNoSystemSymbol || scenario == fixtureNullSystemRoot ||
+                        scenario == fixtureSystemNullOutput;
+    BOOL createdSystem=triedSystem || scenario == fixtureNullSystemRoot;
+    BOOL success=scenario != fixtureAllFail && scenario != fixtureNoParamsSymbol;
+    int32_t systemStatus=triedSystem ? (scenario == fixtureSystemFailAppSuccess ||
+        scenario == fixtureAllFail ? -25212 : 0) : INT32_MIN;
+    int32_t appParamsStatus=triedAppParams ? (scenario == fixtureAllFail ? -25212 : 0) : INT32_MIN;
+    int32_t finalStatus=success ? 0 : (scenario == fixtureNoParamsSymbol ? -25202 : -25212);
+    const char *expectedOrder=scenario == fixtureAppSuccess || scenario == fixtureNoParamsSymbol ? "D" :
+        scenario == fixtureSystemSuccess ? "DS" : triedSystem ? "DSA" : "DA";
+    assert(strcmp(fixtureOrder,expectedOrder) == 0);
+    assert(fixtureAppCreates == 1 && fixtureDirectHits == 1);
+    assert(fixtureSystemCreates == (createdSystem ? 1U : 0U));
+    assert(fixtureSystemParamsHits == (triedSystem ? 1U : 0U));
+    assert(fixtureAppParamsHits == (triedAppParams ? 1U : 0U));
+    unsigned hitTimeouts=1U+(triedSystem ? 1U : 0U)+(triedAppParams ? 1U : 0U);
+    if (success) assert(fixtureTimeouts > hitTimeouts);
+    else assert(fixtureTimeouts == hitTimeouts);
     assert(context->pid == getpid());
     assert(context->running && context->inFlight);
     assert(context->appHitStatus == (scenario == fixtureAppSuccess ? 0 : -25202));
-    assert(context->systemHitStatus == (triedSystem ?
-           (scenario == fixtureBothFail ? -25212 : 0) : INT32_MIN));
-    assert(context->axStatus == (scenario == fixtureAppSuccess ||
-           scenario == fixtureSystemSuccess ? 0 :
-           scenario == fixtureBothFail ? -25212 : -25202));
-    assert(context->systemRootAvailable == systemAvailable);
+    assert(context->systemHitStatus == INT32_MIN);
+    assert(context->systemParamsStatus == systemStatus);
+    assert(context->appParamsStatus == appParamsStatus);
+    assert(context->axStatus == finalStatus);
+    assert(context->systemRootAvailable == triedSystem);
     assert(context->systemRootTried == triedSystem);
     assert(context->claimed == !success);
     assert(context->code == (success ? 0 : 3407));
     assert([context->lastStage isEqual:success ? @"node-build" : @"native-hit-test"]);
+    NSDictionary *attempts=zxPointAttemptsLocked(context);
+    assert([attempts[@"applicationHitStatus"] intValue] == context->appHitStatus);
+    assert(attempts[@"systemHitStatus"] == [NSNull null]);
+    assert((triedSystem ? [attempts[@"systemWithParamsStatus"] intValue] == systemStatus :
+            attempts[@"systemWithParamsStatus"] == [NSNull null]));
+    assert((triedAppParams ? [attempts[@"applicationWithParamsStatus"] intValue] == appParamsStatus :
+            attempts[@"applicationWithParamsStatus"] == [NSNull null]));
+    assert([attempts[@"runtimeWithParamsSymbol"] boolValue] == (scenario != fixtureNoParamsSymbol));
+    assert([attempts[@"systemRootSymbol"] boolValue] == (scenario != fixtureNoSystemSymbol));
+    assert([attempts[@"systemRootAvailable"] boolValue] == triedSystem);
+    assert([attempts[@"systemRootTried"] boolValue] == triedSystem);
+    assert([attempts[@"applicationWithParamsTried"] boolValue] == triedAppParams);
+    assert([attempts[@"systemWithParamsTried"] boolValue] == triedSystem);
+    assert([attempts[@"hitRoot"] isEqual:triedAppParams ? @"application" :
+            triedSystem ? @"system-wide" : @"application"]);
+    assert([attempts[@"hitMode"] isEqual:triedAppParams ? @"application-with-params" :
+            triedSystem ? @"systemwide-with-params" : @"application-direct"]);
     if (success) {
         assert([context->leaf[@"role"] isEqual:@"AXButton"]);
         assert([context->leaf[@"label"] isEqual:@"中文按钮"]);
         assert([context->leaf[@"identifier"] isEqual:@"button-id"]);
         assert([context->leaf[@"children"] count] == 0);
-    } else assert(context->leaf == nil);
+    } else {
+        assert(context->leaf == nil);
+        NSString *description=zxPointErrorDescriptionDetails(context->code,context->axStatus,
+            context->pid,context->lastStage,context->inFlight,0,&table,attempts);
+        NSRange marker=[description rangeOfString:@"diagnostics="];
+        assert(marker.location != NSNotFound);
+        NSData *bytes=[[description substringFromIndex:NSMaxRange(marker)] dataUsingEncoding:NSUTF8StringEncoding];
+        NSDictionary *payload=[NSJSONSerialization JSONObjectWithData:bytes options:0 error:nil];
+        assert([payload[@"axStatus"] intValue] == finalStatus);
+        assert([payload[@"applicationHitStatus"] intValue] == -25202);
+        assert([payload[@"applicationWithParamsTried"] boolValue] == triedAppParams);
+        assert([payload[@"systemWithParamsTried"] boolValue] == triedSystem);
+        assert([payload[@"hitMode"] isEqual:attempts[@"hitMode"]]);
+    }
     assert(CFGetRetainCount(fixtureAppRoot) == 1);
     assert(CFGetRetainCount(fixtureSystemRoot) == 1);
     assert(CFGetRetainCount(fixtureAppElement) == 1);
     assert(CFGetRetainCount(fixtureSystemElement) == 1);
+    assert(CFGetRetainCount(fixtureParamsElement) == 1);
     CFRelease(fixtureAppRoot);
     CFRelease(fixtureSystemRoot);
     CFRelease(fixtureAppElement);
     CFRelease(fixtureSystemElement);
-    fixtureAppRoot=fixtureSystemRoot=fixtureAppElement=fixtureSystemElement=NULL;
+    CFRelease(fixtureParamsElement);
+    fixtureAppRoot=fixtureSystemRoot=fixtureAppElement=fixtureSystemElement=fixtureParamsElement=NULL;
 }
 
 int main(void) {
@@ -196,9 +273,12 @@ int main(void) {
         assert([switchLeaf[@"displayId"] intValue] == 3);
         fixtureTestCapture(fixtureAppSuccess);
         fixtureTestCapture(fixtureSystemSuccess);
-        fixtureTestCapture(fixtureBothFail);
+        fixtureTestCapture(fixtureSystemFailAppSuccess);
+        fixtureTestCapture(fixtureAllFail);
+        fixtureTestCapture(fixtureNoParamsSymbol);
         fixtureTestCapture(fixtureNoSystemSymbol);
         fixtureTestCapture(fixtureNullSystemRoot);
+        fixtureTestCapture(fixtureSystemNullOutput);
         for (int fault=1;fault<=3;++fault) {
             zxPointEncoderFault=fault; zxPointEncoderCalls=0;
             NSString *description=zxPointErrorDescription(3407,-25212,42,@"native-hit-test",YES,5000000ULL,&table);
